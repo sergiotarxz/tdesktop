@@ -332,6 +332,7 @@ void ContactStatus::setupWidgets(not_null<Ui::RpWidget*> parent) {
 
 auto ContactStatus::PeerState(not_null<PeerData*> peer)
 -> rpl::producer<State> {
+	
 	using SettingsChange = PeerData::Settings::Change;
 	using Type = State::Type;
 	if (const auto user = peer->asUser()) {
@@ -389,7 +390,7 @@ auto ContactStatus::PeerState(not_null<PeerData*> peer)
 }
 
 void ContactStatus::setupState(not_null<PeerData*> peer) {
-	if (!BarCurrentlyHidden(peer)) {
+	if (!BarCurrentlyHidden(peer) && !peer->isEncrypted()) {
 		peer->session().api().requestPeerSettings(peer);
 	}
 

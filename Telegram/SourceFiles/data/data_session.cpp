@@ -44,6 +44,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "data/data_user.h"
+#include "data/data_encrypted_chat.h"
 #include "data/data_file_origin.h"
 #include "data/data_download_manager.h"
 #include "data/data_photo.h"
@@ -324,6 +325,8 @@ not_null<PeerData*> Session::peer(PeerId id) {
 			return std::make_unique<ChatData>(this, id);
 		} else if (peerIsChannel(id)) {
 			return std::make_unique<ChannelData>(this, id);
+		} else if (peerIsEncrypted(id)) {
+			return std::make_unique<EncryptedChatData>(this, id);
 		}
 		Unexpected("Peer id type.");
 	}();

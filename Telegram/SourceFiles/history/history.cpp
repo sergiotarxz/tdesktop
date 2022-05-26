@@ -2502,6 +2502,8 @@ bool History::shouldBeInChatList() const {
 		if (user->isBot() && isTopPromoted()) {
 			return true;
 		}
+	} else if (const auto encrypted = peer->asEncrypted()) {
+		return true;
 	}
 	return !lastMessageKnown()
 		|| (lastMessage() != nullptr);
@@ -2942,6 +2944,10 @@ bool History::isEmpty() const {
 }
 
 bool History::isDisplayedEmpty() const {
+	const auto encrypted = peer->asEncrypted();
+	if (encrypted) {
+		return false;
+	}
 	if (!loadedAtTop() || !loadedAtBottom()) {
 		return false;
 	}
@@ -2953,7 +2959,6 @@ bool History::isDisplayedEmpty() const {
 	if (!chat || !chat->amCreator()) {
 		return false;
 	}
-
 	// For legacy chats we want to show the chat with only
 	// messages about you creating the group and maybe about you
 	// changing the group photo as an empty chat with

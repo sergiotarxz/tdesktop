@@ -1047,9 +1047,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_info_user_title" = "User Info";
 "lng_info_bot_title" = "Bot Info";
 "lng_info_group_title" = "Group Info";
+"lng_info_encrypted_title" = "Secret chat Info";
 "lng_info_channel_title" = "Channel Info";
 "lng_profile_enable_notifications" = "Notifications";
 "lng_profile_send_message" = "Send Message";
+"lng_profile_start_secret_chat" = "Start secret chat🔓";
 "lng_info_add_as_contact" = "Add to contacts";
 "lng_profile_shared_media" = "Shared media";
 "lng_media_type_photos" = "Photos";
@@ -1593,6 +1595,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_group_about2" = "Persistent chat history";
 "lng_group_about3" = "Public links such as t.me/title";
 "lng_group_about4" = "Admins with different rights";
+
+"lng_secret_chat_about_header" = "You have created a secret chat.";
+"lng_secret_chat_about_text" = "Secret chats can only be read by the user you are comunicating with.";
 
 "lng_switch_stickers" = "Stickers";
 "lng_switch_emoji" = "Emoji";

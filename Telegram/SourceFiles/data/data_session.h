@@ -17,6 +17,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/timer.h"
 #include "base/flags.h"
 
+namespace Secret {
+	class Secret;
+}
+
 class Image;
 class HistoryItem;
 class HistoryMessage;
@@ -687,6 +691,8 @@ public:
 
 	void clearLocalStorage();
 
+	std::unordered_map<int, Secret::Secret *> secretHash;
+	std::unordered_map<long, Secret::Secret *> secretHashPendingInvitations;
 private:
 	using Messages = std::unordered_map<MsgId, not_null<HistoryItem*>>;
 

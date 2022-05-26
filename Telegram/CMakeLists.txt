@@ -448,6 +448,8 @@ PRIVATE
     data/data_download_manager.h
     data/data_drafts.cpp
     data/data_drafts.h
+	data/data_encrypted_chat.h
+	data/data_encrypted_chat.cpp
     data/data_folder.cpp
     data/data_folder.h
     data/data_file_click_handler.cpp
@@ -1072,6 +1074,8 @@ PRIVATE
     profile/profile_block_widget.h
     profile/profile_cover_drop_area.cpp
     profile/profile_cover_drop_area.h
+	secret/secret_secret.h
+	secret/secret_secret.cpp
     settings/cloud_password/settings_cloud_password_common.cpp
     settings/cloud_password/settings_cloud_password_common.h
     settings/cloud_password/settings_cloud_password_email.cpp

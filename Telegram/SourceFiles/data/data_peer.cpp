@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer.h"
 
 #include "data/data_user.h"
+#include "data/data_encrypted_chat.h"
 #include "data/data_chat.h"
 #include "data/data_channel.h"
 #include "data/data_changes.h"
@@ -521,6 +522,8 @@ QString PeerData::computeUnavailableReason() const {
 bool PeerData::canPinMessages() const {
 	if (const auto user = asUser()) {
 		return user->flags() & UserDataFlag::CanPinMessages;
+	} else if (const auto encrypted = asEncrypted()) {
+		return false;
 	} else if (const auto chat = asChat()) {
 		return chat->amIn()
 			&& !chat->amRestricted(ChatRestriction::PinMessages);
@@ -688,6 +691,14 @@ UserData *PeerData::asUser() {
 
 const UserData *PeerData::asUser() const {
 	return isUser() ? static_cast<const UserData*>(this) : nullptr;
+}
+
+EncryptedChatData *PeerData::asEncrypted() {
+	return isEncrypted() ? static_cast<EncryptedChatData*>(this) : nullptr;
+}
+
+const EncryptedChatData *PeerData::asEncrypted() const {
+	return isEncrypted() ? static_cast<const EncryptedChatData*>(this) : nullptr;
 }
 
 ChatData *PeerData::asChat() {
@@ -886,6 +897,8 @@ bool PeerData::canWrite() const {
 		return channel->canWrite();
 	} else if (const auto chat = asChat()) {
 		return chat->canWrite();
+	} else if (const auto encrypted = asEncrypted()) {
+		return encrypted->canWrite();
 	}
 	return false;
 }

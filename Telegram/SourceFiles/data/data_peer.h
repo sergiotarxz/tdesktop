@@ -17,6 +17,7 @@ class PeerData;
 class UserData;
 class ChatData;
 class ChannelData;
+class EncryptedChatData;
 
 enum class ChatRestriction;
 
@@ -170,6 +171,9 @@ public:
 	[[nodiscard]] bool isChannel() const {
 		return peerIsChannel(id);
 	}
+	[[nodiscard]] bool isEncrypted() const {
+		return peerIsEncrypted(id);
+	}
 	[[nodiscard]] bool isSelf() const;
 	[[nodiscard]] bool isVerified() const;
 	[[nodiscard]] bool isScam() const;
@@ -229,6 +233,8 @@ public:
 
 	[[nodiscard]] UserData *asUser();
 	[[nodiscard]] const UserData *asUser() const;
+	[[nodiscard]] EncryptedChatData *asEncrypted();
+	[[nodiscard]] const EncryptedChatData *asEncrypted() const;
 	[[nodiscard]] ChatData *asChat();
 	[[nodiscard]] const ChatData *asChat() const;
 	[[nodiscard]] ChannelData *asChannel();
@@ -418,10 +424,14 @@ public:
 	const PeerId id;
 	QString name;
 	MTPinputPeer input = MTP_inputPeerEmpty();
+	[[nodiscard]] const Data::CloudImage *getUserpic() const {
+		return &_userpic;
+	}
 
 	int nameVersion = 1;
 
 protected:
+	mutable Data::CloudImage _userpic;
 	void updateNameDelayed(
 		const QString &newName,
 		const QString &newNameOrPhone,
@@ -439,7 +449,6 @@ private:
 
 	const not_null<Data::Session*> _owner;
 
-	mutable Data::CloudImage _userpic;
 	PhotoId _userpicPhotoId = kUnknownPhotoId;
 	mutable std::unique_ptr<Ui::EmptyUserpic> _userpicEmpty;
 	Ui::Text::String _nameText;
@@ -458,12 +467,12 @@ private:
 	BlockStatus _blockStatus = BlockStatus::Unknown;
 	LoadedStatus _loadedStatus = LoadedStatus::Not;
 
-	QString _requestChatTitle;
 	TimeId _requestChatDate = 0;
 
 	QString _about;
 	QString _themeEmoticon;
-
+protected:
+	QString _requestChatTitle;
 };
 
 namespace Data {

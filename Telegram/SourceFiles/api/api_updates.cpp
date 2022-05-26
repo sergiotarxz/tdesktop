@@ -22,6 +22,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/stickers/data_stickers.h"
 #include "data/data_session.h"
 #include "data/data_user.h"
+#include "data/data_encrypted_chat.h"
 #include "data/data_chat.h"
 #include "data/data_changes.h"
 #include "data/data_channel.h"
@@ -52,6 +53,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/boxes/confirm_box.h"
 #include "apiwrap.h"
 #include "ui/text/format_values.h" // Ui::FormatPhone
+#include "secret/secret_secret.h"
 
 namespace Api {
 namespace {
@@ -1956,12 +1958,18 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 	} break;
 
 	case mtpc_updateNewEncryptedMessage: {
+		auto &updateNewEncryptedMessage = update.c_updateNewEncryptedMessage();
+		Secret::handleUpdateNewEncryptedMessage(&session(), updateNewEncryptedMessage);
 	} break;
 
 	case mtpc_updateEncryptedChatTyping: {
 	} break;
 
+	case mtpc_encryptedChatRequested: {
+	} break;
+
 	case mtpc_updateEncryption: {
+		Secret::handleUpdateEncryption(&session(), update);
 	} break;
 
 	case mtpc_updateEncryptedMessagesRead: {

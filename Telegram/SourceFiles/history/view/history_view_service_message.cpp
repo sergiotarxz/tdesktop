@@ -638,6 +638,20 @@ EmptyPainter::EmptyPainter(not_null<History*> history) : _history(history) {
 	if (NeedAboutGroup(_history)) {
 		fillAboutGroup();
 	}
+	if (_history->peer->asEncrypted()) {
+		fillAboutSecretChat();
+	}
+}
+
+void EmptyPainter::fillAboutSecretChat() {
+	const auto setText = [](Ui::Text::String &text, const QString &content) {
+		text.setText(
+			st::serviceTextStyle,
+			content,
+			Ui::NameTextOptions());
+	};
+	setText(_header, tr::lng_secret_chat_about_header(tr::now));
+	setText(_text, tr::lng_secret_chat_about_text(tr::now));
 }
 
 void EmptyPainter::fillAboutGroup() {

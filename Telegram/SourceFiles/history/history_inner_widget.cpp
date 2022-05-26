@@ -469,6 +469,12 @@ void HistoryInner::setupSharingDisallowed() {
 		_sharingDisallowed = false;
 		return;
 	}
+
+	if (_peer->isEncrypted()) {
+		_sharingDisallowed = true;
+		return;
+	}
+
 	const auto chat = _peer->asChat();
 	const auto channel = _peer->asChannel();
 	_sharingDisallowed = chat

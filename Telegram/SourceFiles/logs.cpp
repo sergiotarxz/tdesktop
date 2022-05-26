@@ -277,7 +277,7 @@ void _logsWrite(LogDataType type, const QString &msg) {
 namespace Logs {
 namespace {
 
-bool DebugModeEnabled = false;
+bool DebugModeEnabled = true;
 
 void MoveOldDataFiles(const QString &wasDir) {
 	QFile data(wasDir + "data"), dataConfig(wasDir + "data_config"), tdataConfig(wasDir + "tdata/config");

@@ -173,6 +173,10 @@ rpl::producer<bool> CanWriteValue(UserData *user) {
 		| rpl::map(!_1);
 }
 
+rpl::producer<bool> CanWriteValue(EncryptedChatData *encrypted) {
+	return rpl::single(true);
+}
+
 rpl::producer<bool> CanWriteValue(ChatData *chat) {
 	using namespace rpl::mappers;
 	const auto mask = 0
@@ -243,6 +247,8 @@ rpl::producer<bool> CanWriteValue(not_null<PeerData*> peer) {
 		return CanWriteValue(chat);
 	} else if (auto channel = peer->asChannel()) {
 		return CanWriteValue(channel);
+	} else if (auto encrypted = peer->asEncrypted()) {
+		return CanWriteValue(encrypted);
 	}
 	Unexpected("Bad peer value in CanWriteValue");
 }

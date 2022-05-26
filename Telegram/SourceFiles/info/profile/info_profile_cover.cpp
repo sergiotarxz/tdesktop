@@ -258,7 +258,9 @@ Cover::Cover(
 		? st::infoProfileMegagroupStatusLabel
 		: st::infoProfileStatusLabel)
 , _refreshStatusTimer([this] { refreshStatusText(); }) {
-	_peer->updateFull();
+	if (!_peer->isEncrypted()) {
+		_peer->updateFull();
+	}
 
 	_name->setSelectable(true);
 	_name->setContextCopyText(tr::lng_profile_copy_fullname(tr::now));

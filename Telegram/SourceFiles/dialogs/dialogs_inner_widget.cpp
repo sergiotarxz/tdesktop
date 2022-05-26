@@ -1536,7 +1536,7 @@ void InnerWidget::updateSearchResult(not_null<PeerData*> peer) {
 					break;
 				}
 				++index;
-			}
+			}	
 		}
 	}
 }

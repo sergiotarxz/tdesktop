@@ -125,6 +125,7 @@ public:
 
 private:
 	void fillAboutGroup();
+	void fillAboutSecretChat();
 
 	not_null<History*> _history;
 	Ui::Text::String _header = { st::msgMinWidth };
