@@ -57,6 +57,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "facades.h"
 #include "styles/style_info.h"
 #include "styles/style_boxes.h"
+#include "secret/secret_secret.h"
 
 #include <QtGui/QGuiApplication>
 #include <QtGui/QClipboard>
@@ -449,6 +450,32 @@ Ui::MultiSlideTracker DetailsFiller::fillUserButtons(
 			tracker);
 	};
 
+	auto addStartSecretChatButton = [&] {
+		auto activePeerValue = window->activeChatValue(
+		) | rpl::map([](Dialogs::Key key) {
+			return key.peer();
+		});
+		auto sendMessageVisible = rpl::combine(
+			_controller->wrapValue(),
+			std::move(activePeerValue),
+			(_1 != Wrap::Side) || (_2 != user));
+		auto sendMessage = [window, user] {
+			Secret::Secret *secret = new Secret::Secret(user);
+			secret->getDiffieHellman([secret] {
+				secret->sendEncryptedRequest();
+			});
+			window->showPeerHistory(
+				user,
+				Window::SectionShow::Way::Forward);
+		};
+		AddMainButton(
+			_wrap,
+			tr::lng_profile_start_secret_chat(),
+			std::move(sendMessageVisible),
+			std::move(sendMessage),
+			tracker);
+	};
+
 	if (user->isSelf()) {
 		auto separator = _wrap->add(object_ptr<Ui::SlideWrap<>>(
 			_wrap,
@@ -459,12 +486,14 @@ Ui::MultiSlideTracker DetailsFiller::fillUserButtons(
 		);
 
 		addSendMessageButton();
-
+		addStartSecretChatButton();
+		
 		separator->toggleOn(
 			std::move(tracker).atLeastOneShownValue()
 		);
 	} else {
 		addSendMessageButton();
+        addStartSecretChatButton();
 	}
 	return tracker;
 }

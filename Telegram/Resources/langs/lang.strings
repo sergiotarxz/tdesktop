@@ -1050,6 +1050,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 "lng_info_channel_title" = "Channel Info";
 "lng_profile_enable_notifications" = "Notifications";
 "lng_profile_send_message" = "Send Message";
+"lng_profile_start_secret_chat" = "Start secret chat🔓";
 "lng_info_add_as_contact" = "Add to contacts";
 "lng_profile_shared_media" = "Shared media";
 "lng_media_type_photos" = "Photos";
