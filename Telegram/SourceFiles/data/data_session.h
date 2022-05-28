@@ -428,13 +428,16 @@ public:
 		return _documentLoadProgress.events();
 	}
 
+	template <typename MessageType>
 	HistoryItem *addNewMessage(
-		const MTPMessage &data,
+		const MessageType &data,
 		MessageFlags localFlags,
 		NewMessageType type);
+
+	template <typename MessageType>
 	HistoryItem *addNewMessage( // Override message id.
 		MsgId id,
-		const MTPMessage &data,
+		const MessageType &data,
 		MessageFlags localFlags,
 		NewMessageType type);
 

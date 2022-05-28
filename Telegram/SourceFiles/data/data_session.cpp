@@ -2219,16 +2219,18 @@ Session::SentData Session::messageSentData(uint64 randomId) const {
 	return (i != end(_sentMessagesData)) ? i->second : SentData();
 }
 
+template <typename MessageType>
 HistoryItem *Session::addNewMessage(
-		const MTPMessage &data,
+		const MessageType &data,
 		MessageFlags localFlags,
 		NewMessageType type) {
 	return addNewMessage(IdFromMessage(data), data, localFlags, type);
 }
 
+template <typename MessageType>
 HistoryItem *Session::addNewMessage(
 		MsgId id,
-		const MTPMessage &data,
+		const MessageType &data,
 		MessageFlags localFlags,
 		NewMessageType type) {
 	const auto peerId = PeerFromMessage(data);

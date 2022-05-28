@@ -159,9 +159,10 @@ public:
 
 	void unpinAllMessages();
 
+	template <typename MessageType>
 	not_null<HistoryItem*> addNewMessage(
 		MsgId id,
-		const MTPMessage &msg,
+		const MessageType &msg,
 		MessageFlags localFlags,
 		NewMessageType type);
 	not_null<HistoryItem*> addNewLocalMessage(
@@ -551,9 +552,10 @@ private:
 	void setOutboxReadTill(MsgId upTo);
 	void readClientSideMessages();
 
+	template <typename MessageType>
 	void applyMessageChanges(
 		not_null<HistoryItem*> item,
-		const MTPMessage &original);
+		const MessageType &original);
 	void applyServiceChanges(
 		not_null<HistoryItem*> item,
 		const MTPDmessageService &data);

@@ -134,6 +134,7 @@ bool operator>=(PeerIdZero, ChatIdType<Shift>) = delete;
 using UserId = ChatIdType<0>;
 using ChatId = ChatIdType<1>;
 using ChannelId = ChatIdType<2>;
+using EncryptedId = ChatIdType<3>;
 using FakeChatId = ChatIdType<0x7F>;
 
 struct PeerIdHelper {

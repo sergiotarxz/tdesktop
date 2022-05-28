@@ -112,6 +112,12 @@ PeerId PeerFromMessage(const MTPmessage &message) {
 	});
 }
 
+PeerId PeerFromMessage(const MTPencryptedMessage &message) {
+	return message.match([](const auto &message) {
+		return PeerId(EncryptedId((uint64) message.vchat_id().v));
+	});
+}
+
 MTPDmessage::Flags FlagsFromMessage(const MTPmessage &message) {
 	return message.match([](const MTPDmessageEmpty &) {
 		return MTPDmessage::Flags(0);

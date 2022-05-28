@@ -401,9 +401,10 @@ std::vector<not_null<HistoryItem*>> History::createItems(
 	return result;
 }
 
+template <typename MessageType>
 not_null<HistoryItem*> History::addNewMessage(
 		MsgId id,
-		const MTPMessage &msg,
+		const MessageType &msg,
 		MessageFlags localFlags,
 		NewMessageType type) {
 	const auto detachExistingItem = (type == NewMessageType::Unread);
@@ -855,9 +856,10 @@ not_null<HistoryItem*> History::addNewToBack(
 	return item;
 }
 
+template <typename MessageType>
 void History::applyMessageChanges(
 		not_null<HistoryItem*> item,
-		const MTPMessage &data) {
+		const MessageType &data) {
 	if (data.type() == mtpc_messageService) {
 		applyServiceChanges(item, data.c_messageService());
 	}
