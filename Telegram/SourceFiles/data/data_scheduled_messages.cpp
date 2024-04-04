@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_scheduled_messages.h"
 
 #include "base/unixtime.h"
+#include "data/data_forum_topic.h"
 #include "data/data_peer.h"
 #include "data/data_session.h"
 #include "api/api_hash.h"
@@ -15,7 +16,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "history/history.h"
 #include "history/history_item_components.h"
-#include "history/history_message.h"
+#include "history/history_item_helpers.h"
 #include "apiwrap.h"
 
 namespace Data {
@@ -30,8 +31,7 @@ constexpr auto kRequestTimeLimit = 60 * crl::time(1000);
 }
 
 [[nodiscard]] MsgId LocalToRemoteMsgId(MsgId id) {
-	Expects(id > ServerMaxMsgId);
-	Expects(id < ServerMaxMsgId + ScheduledMsgIdsRange);
+	Expects(IsScheduledMsgId(id));
 
 	return (id - ServerMaxMsgId - 1);
 }
@@ -41,7 +41,7 @@ constexpr auto kRequestTimeLimit = 60 * crl::time(1000);
 }
 
 [[nodiscard]] bool HasScheduledDate(not_null<HistoryItem*> item) {
-	return (item->date() != ScheduledMessages::kScheduledUntilOnlineTimestamp)
+	return (item->date() != Api::kScheduledUntilOnlineTimestamp)
 		&& (item->date() > base::unixtime::now());
 }
 
@@ -68,9 +68,12 @@ constexpr auto kRequestTimeLimit = 60 * crl::time(1000);
 			MTP_flags(data.vflags().v | MTPDmessage::Flag::f_from_scheduled),
 			data.vid(),
 			data.vfrom_id() ? *data.vfrom_id() : MTPPeer(),
+			MTPint(), // from_boosts_applied
 			data.vpeer_id(),
+			data.vsaved_peer_id() ? *data.vsaved_peer_id() : MTPPeer(),
 			data.vfwd_from() ? *data.vfwd_from() : MTPMessageFwdHeader(),
 			MTP_long(data.vvia_bot_id().value_or_empty()),
+			MTP_long(data.vvia_business_bot_id().value_or_empty()),
 			data.vreply_to() ? *data.vreply_to() : MTPMessageReplyHeader(),
 			data.vdate(),
 			data.vmessage(),
@@ -87,11 +90,16 @@ constexpr auto kRequestTimeLimit = 60 * crl::time(1000);
 			MTP_long(data.vgrouped_id().value_or_empty()),
 			MTPMessageReactions(),
 			MTPVector<MTPRestrictionReason>(),
-			MTP_int(data.vttl_period().value_or_empty()));
+			MTP_int(data.vttl_period().value_or_empty()),
+			MTPint()); // quick_reply_shortcut_id
 	});
 }
 
 } // namespace
+
+bool IsScheduledMsgId(MsgId id) {
+	return (id > ServerMaxMsgId) && (id < ScheduledMaxMsgId);
+}
 
 ScheduledMessages::ScheduledMessages(not_null<Session*> owner)
 : _session(&owner->session())
@@ -167,6 +175,16 @@ int ScheduledMessages::count(not_null<History*> history) const {
 	return (i != end(_data)) ? i->second.items.size() : 0;
 }
 
+bool ScheduledMessages::hasFor(not_null<Data::ForumTopic*> topic) const {
+	const auto i = _data.find(topic->owningHistory());
+	if (i == end(_data)) {
+		return false;
+	}
+	return ranges::any_of(i->second.items, [&](const OwnedItem &item) {
+		return item->topic() == topic;
+	});
+}
+
 void ScheduledMessages::sendNowSimpleMessage(
 		const MTPDupdateShortSentMessage &update,
 		not_null<HistoryItem*> local) {
@@ -188,12 +206,13 @@ void ScheduledMessages::sendNowSimpleMessage(
 
 	const auto history = local->history();
 	auto action = Api::SendAction(history);
-	action.replyTo = local->replyToId();
+	action.replyTo = local->replyTo();
 	const auto replyHeader = NewMessageReplyHeader(action);
-	const auto localFlags = NewMessageFlags(history->peer);
+	const auto localFlags = NewMessageFlags(history->peer)
+		& ~MessageFlag::BeingSent;
 	const auto flags = MTPDmessage::Flag::f_entities
 		| MTPDmessage::Flag::f_from_id
-		| (local->replyToId()
+		| (action.replyTo
 			? MTPDmessage::Flag::f_reply_to
 			: MTPDmessage::Flag(0))
 		| (update.vttl_period()
@@ -210,9 +229,12 @@ void ScheduledMessages::sendNowSimpleMessage(
 			MTP_flags(flags),
 			update.vid(),
 			peerToMTP(local->from()->id),
+			MTPint(), // from_boosts_applied
 			peerToMTP(history->peer->id),
+			MTPPeer(), // saved_peer_id
 			MTPMessageFwdHeader(),
 			MTPlong(), // via_bot_id
+			MTPlong(), // via_business_bot_id
 			replyHeader,
 			update.vdate(),
 			MTP_string(local->originalText().text),
@@ -229,7 +251,8 @@ void ScheduledMessages::sendNowSimpleMessage(
 			MTPlong(),
 			MTPMessageReactions(),
 			MTPVector<MTPRestrictionReason>(),
-			MTP_int(update.vttl_period().value_or_empty())),
+			MTP_int(update.vttl_period().value_or_empty()),
+			MTPint()), // quick_reply_shortcut_id
 		localFlags,
 		NewMessageType::Unread);
 
@@ -364,7 +387,8 @@ rpl::producer<> ScheduledMessages::updates(not_null<History*> history) {
 	}) | rpl::to_empty;
 }
 
-Data::MessagesSlice ScheduledMessages::list(not_null<History*> history) {
+Data::MessagesSlice ScheduledMessages::list(
+		not_null<History*> history) const {
 	auto result = Data::MessagesSlice();
 	const auto i = _data.find(history);
 	if (i == end(_data)) {
@@ -386,9 +410,34 @@ Data::MessagesSlice ScheduledMessages::list(not_null<History*> history) {
 	return result;
 }
 
+Data::MessagesSlice ScheduledMessages::list(
+		not_null<const Data::ForumTopic*> topic) const {
+	auto result = Data::MessagesSlice();
+	const auto i = _data.find(topic->Data::Thread::owningHistory());
+	if (i == end(_data)) {
+		const auto i = _requests.find(topic->Data::Thread::owningHistory());
+		if (i == end(_requests)) {
+			return result;
+		}
+		result.fullCount = result.skippedAfter = result.skippedBefore = 0;
+		return result;
+	}
+	const auto &list = i->second.items;
+	result.skippedAfter = result.skippedBefore = 0;
+	result.fullCount = int(list.size());
+	result.ids = ranges::views::all(
+		list
+	) | ranges::views::filter([&](const OwnedItem &item) {
+		return item->topic() == topic;
+	}) | ranges::views::transform(
+		&HistoryItem::fullId
+	) | ranges::to_vector;
+	return result;
+}
+
 void ScheduledMessages::request(not_null<History*> history) {
 	const auto peer = history->peer;
-	if (peer->isBroadcast() && !peer->canWrite()) {
+	if (peer->isBroadcast() && !Data::CanSendAnything(peer)) {
 		return;
 	}
 	auto &request = _requests[history];
@@ -462,16 +511,17 @@ HistoryItem *ScheduledMessages::append(
 			// probably this message was edited.
 			if (data.is_edit_hide()) {
 				existing->applyEdition(HistoryMessageEdition(_session, data));
+			} else {
+				existing->updateSentContent({
+					qs(data.vmessage()),
+					Api::EntitiesFromMTP(
+						_session,
+						data.ventities().value_or_empty())
+				}, data.vmedia());
+				existing->updateReplyMarkup(
+					HistoryMessageMarkupData(data.vreply_markup()));
+				existing->updateForwardedInfo(data.vfwd_from());
 			}
-			existing->updateSentContent({
-				qs(data.vmessage()),
-				Api::EntitiesFromMTP(
-					_session,
-					data.ventities().value_or_empty())
-			}, data.vmedia());
-			existing->updateReplyMarkup(
-				HistoryMessageMarkupData(data.vreply_markup()));
-			existing->updateForwardedInfo(data.vfwd_from());
 			existing->updateDate(data.vdate().v);
 			history->owner().requestItemTextRefresh(existing);
 		}, [&](const auto &data) {});

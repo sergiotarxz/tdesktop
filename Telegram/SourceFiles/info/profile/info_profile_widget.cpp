@@ -7,27 +7,46 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/profile/info_profile_widget.h"
 
+#include "dialogs/ui/dialogs_stories_content.h"
 #include "info/profile/info_profile_inner_widget.h"
 #include "info/profile/info_profile_members.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/ui_utility.h"
 #include "data/data_peer.h"
 #include "data/data_channel.h"
+#include "data/data_forum_topic.h"
 #include "data/data_user.h"
 #include "lang/lang_keys.h"
 #include "info/info_controller.h"
 
-namespace Info {
-namespace Profile {
+namespace Info::Profile {
 
 Memento::Memento(not_null<Controller*> controller)
 : Memento(
 	controller->peer(),
-	controller->migratedPeerId()) {
+	controller->topic(),
+	controller->migratedPeerId(),
+	{ v::null }) {
 }
 
-Memento::Memento(not_null<PeerData*> peer, PeerId migratedPeerId)
-: ContentMemento(peer, migratedPeerId) {
+Memento::Memento(
+	not_null<PeerData*> peer,
+	PeerId migratedPeerId,
+	Origin origin)
+: Memento(peer, nullptr, migratedPeerId, origin) {
+}
+
+Memento::Memento(
+	not_null<PeerData*> peer,
+	Data::ForumTopic *topic,
+	PeerId migratedPeerId,
+	Origin origin)
+: ContentMemento(peer, topic, migratedPeerId)
+, _origin(origin) {
+}
+
+Memento::Memento(not_null<Data::ForumTopic*> topic)
+: ContentMemento(topic->channel(), topic, 0) {
 }
 
 Section Memento::section() const {
@@ -38,9 +57,7 @@ object_ptr<ContentWidget> Memento::createWidget(
 		QWidget *parent,
 		not_null<Controller*> controller,
 		const QRect &geometry) {
-	auto result = object_ptr<Widget>(
-		parent,
-		controller);
+	auto result = object_ptr<Widget>(parent, controller, _origin);
 	result->setInternalState(geometry, this);
 	return result;
 }
@@ -57,13 +74,15 @@ Memento::~Memento() = default;
 
 Widget::Widget(
 	QWidget *parent,
-	not_null<Controller*> controller)
+	not_null<Controller*> controller,
+	Origin origin)
 : ContentWidget(parent, controller) {
 	controller->setSearchEnabledByContent(false);
 
 	_inner = setInnerWidget(object_ptr<InnerWidget>(
 		this,
-		controller));
+		controller,
+		origin));
 	_inner->move(0, 0);
 	_inner->scrollToRequests(
 	) | rpl::start_with_next([this](Ui::ScrollToRequest request) {
@@ -81,6 +100,9 @@ void Widget::setInnerFocus() {
 }
 
 rpl::producer<QString> Widget::title() {
+	if (const auto topic = controller()->key().topic()) {
+		return tr::lng_info_topic_title();
+	}
 	const auto peer = controller()->key().peer();
 	if (const auto user = peer->asUser()) {
 		return (user->isBot() && !user->isSupport())
@@ -96,7 +118,14 @@ rpl::producer<QString> Widget::title() {
 		return tr::lng_info_encrypted_title();
 	}
 	Unexpected("Bad peer type in Info::TitleValue()");
+}
 
+rpl::producer<Dialogs::Stories::Content> Widget::titleStories() {
+	const auto peer = controller()->key().peer();
+	if (peer && !peer->isChat()) {
+		return Dialogs::Stories::LastForPeer(peer);
+	}
+	return nullptr;
 }
 
 bool Widget::showInternal(not_null<ContentMemento*> memento) {
@@ -134,5 +163,4 @@ void Widget::restoreState(not_null<Memento*> memento) {
 	scrollTopRestore(memento->scrollTop());
 }
 
-} // namespace Profile
-} // namespace Info
+} // namespace Info::Profile

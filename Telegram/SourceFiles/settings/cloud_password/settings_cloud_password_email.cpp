@@ -13,13 +13,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/cloud_password/settings_cloud_password_common.h"
 #include "settings/cloud_password/settings_cloud_password_email_confirm.h"
 #include "settings/cloud_password/settings_cloud_password_manage.h"
+#include "ui/vertical_list.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/widgets/buttons.h"
-#include "ui/widgets/input_fields.h"
-#include "ui/wrap/padding_wrap.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/wrap/vertical_layout.h"
 #include "window/window_session_controller.h"
-#include "styles/style_boxes.h"
 #include "styles/style_layers.h"
 #include "styles/style_settings.h"
 
@@ -82,7 +81,7 @@ void Email::setupContent() {
 			: tr::lng_settings_cloud_password_email_subtitle(),
 		tr::lng_settings_cloud_password_email_about());
 
-	AddSkip(content, st::settingLocalPasscodeDescriptionBottomSkip);
+	Ui::AddSkip(content, st::settingLocalPasscodeDescriptionBottomSkip);
 
 	const auto wrap = AddWrappedField(
 		content,
@@ -90,9 +89,10 @@ void Email::setupContent() {
 		currentStepDataEmail);
 	const auto newInput = wrap->entity();
 	const auto error = AddError(content, nullptr);
-	QObject::connect(newInput, &Ui::InputField::changed, [=] {
+	newInput->changes(
+	) | rpl::start_with_next([=] {
 		error->hide();
-	});
+	}, newInput->lifetime());
 	AddSkipInsteadOfField(content);
 
 	const auto send = [=](Fn<void()> close) {
@@ -189,7 +189,7 @@ void Email::setupContent() {
 	});
 
 	const auto submit = [=] { button->clicked({}, Qt::LeftButton); };
-	QObject::connect(newInput, &Ui::InputField::submitted, submit);
+	newInput->submits() | rpl::start_with_next(submit, newInput->lifetime());
 
 	setFocusCallback([=] { newInput->setFocus(); });
 

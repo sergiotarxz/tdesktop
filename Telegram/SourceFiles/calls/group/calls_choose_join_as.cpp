@@ -21,6 +21,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/layers/generic_box.h"
 #include "ui/boxes/choose_date_time.h"
 #include "ui/text/text_utilities.h"
+#include "ui/toast/toast.h"
 #include "boxes/peer_list_box.h"
 #include "base/unixtime.h"
 #include "base/timer_rpl.h"
@@ -246,12 +247,11 @@ void ChooseJoinAsBox(
 					: tr::lng_group_call_schedule)(makeLink),
 				Ui::Text::WithEntities),
 			labelSt));
-		label->setClickHandlerFilter([=](const auto&...) {
+		label->overrideLinkClickHandler([=] {
 			auto withJoinAs = info;
 			withJoinAs.joinAs = controller->selected();
 			box->getDelegate()->show(
 				Box(ScheduleGroupCallBox, withJoinAs, done));
-			return false;
 		});
 	}
 	auto next = (context == Context::Switch)
@@ -287,7 +287,7 @@ void ChooseJoinAsBox(
 	}
 	const auto name = !existing->title().isEmpty()
 		? existing->title()
-		: peer->name;
+		: peer->name();
 	return (peer->isBroadcast()
 		? tr::lng_group_call_join_confirm_channel
 		: tr::lng_group_call_join_confirm)(
@@ -308,8 +308,7 @@ ChooseJoinAsProcess::~ChooseJoinAsProcess() {
 void ChooseJoinAsProcess::start(
 		not_null<PeerData*> peer,
 		Context context,
-		Fn<void(object_ptr<Ui::BoxContent>)> showBox,
-		Fn<void(QString)> showToast,
+		std::shared_ptr<Ui::Show> show,
 		Fn<void(JoinInfo)> done,
 		PeerData *changingJoinAsFrom) {
 	Expects(done != nullptr);
@@ -320,8 +319,7 @@ void ChooseJoinAsProcess::start(
 	if (_request) {
 		if (_request->peer == peer && !isScheduled) {
 			_request->context = context;
-			_request->showBox = std::move(showBox);
-			_request->showToast = std::move(showToast);
+			_request->show = std::move(show);
 			_request->done = std::move(done);
 			_request->changingJoinAsFrom = changingJoinAsFrom;
 			return;
@@ -330,13 +328,10 @@ void ChooseJoinAsProcess::start(
 		_request = nullptr;
 	}
 
-	const auto createRequest = [=,
-			showToast = std::move(showToast),
-			done = std::move(done)] {
+	const auto createRequest = [=, done = std::move(done)] {
 		_request = std::make_unique<ChannelsListRequest>(ChannelsListRequest{
 			.peer = peer,
-			.showBox = showBox,
-			.showToast = std::move(showToast),
+			.show = show,
 			.done = std::move(done),
 			.context = context,
 			.changingJoinAsFrom = changingJoinAsFrom });
@@ -350,7 +345,7 @@ void ChooseJoinAsProcess::start(
 				createRequest();
 				finish(info);
 			});
-		showBox(std::move(box));
+		show->showBox(std::move(box));
 		return;
 	}
 
@@ -411,7 +406,7 @@ void ChooseJoinAsProcess::processList(
 	auto info = JoinInfo{ .peer = peer, .joinAs = self };
 	const auto selectedId = peer->groupCallDefaultJoinAs();
 	if (list.empty()) {
-		_request->showToast(Lang::Hard::ServerError());
+		_request->show->showToast(Lang::Hard::ServerError());
 		return;
 	}
 	info.joinAs = [&]() -> not_null<PeerData*> {
@@ -464,7 +459,7 @@ void ChooseJoinAsProcess::processList(
 		const auto safeFinish = crl::guard(guard, [=] { finish(info); });
 		const auto filter = [=](const auto &...) {
 			if (guard) {
-				_request->showBox(Box(
+				_request->show->showBox(Box(
 					ScheduleGroupCallBox,
 					info,
 					crl::guard(guard, [=](auto info) { finish(info); })));
@@ -485,7 +480,7 @@ void ChooseJoinAsProcess::processList(
 		}, _request->lifetime);
 
 		_request->box = box.data();
-		_request->showBox(std::move(box));
+		_request->show->showBox(std::move(box));
 		return;
 	}
 	auto box = Box(
@@ -499,7 +494,7 @@ void ChooseJoinAsProcess::processList(
 	}, _request->lifetime);
 
 	_request->box = box.data();
-	_request->showBox(std::move(box));
+	_request->show->showBox(std::move(box));
 }
 
 } // namespace Calls::Group

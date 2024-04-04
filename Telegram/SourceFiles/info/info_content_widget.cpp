@@ -7,12 +7,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "info/info_content_widget.h"
 
-#include <rpl/never.h>
-#include <rpl/combine.h>
-#include <rpl/range.h>
 #include "window/window_session_controller.h"
 #include "ui/widgets/scroll_area.h"
-#include "ui/widgets/input_fields.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/wrap/padding_wrap.h"
 #include "ui/search_field_controller.h"
 #include "lang/lang_keys.h"
@@ -23,10 +20,16 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/info_section_widget.h"
 #include "info/info_controller.h"
 #include "boxes/peer_list_box.h"
+#include "data/data_chat.h"
+#include "data/data_channel.h"
 #include "data/data_session.h"
+#include "data/data_forum_topic.h"
+#include "data/data_forum.h"
 #include "main/main_session.h"
+#include "window/window_peer_menu.h"
 #include "styles/style_info.h"
 #include "styles/style_profile.h"
+#include "styles/style_layers.h"
 
 #include <QtCore/QCoreApplication>
 
@@ -112,8 +115,18 @@ bool ContentWidget::isStackBottom() const {
 }
 
 void ContentWidget::paintEvent(QPaintEvent *e) {
-	Painter p(this);
-	p.fillRect(e->rect(), _bg);
+	auto p = QPainter(this);
+	if (_paintPadding.isNull()) {
+		p.fillRect(e->rect(), _bg);
+	} else {
+		const auto &r = e->rect();
+		const auto padding = QMargins(
+			0,
+			std::min(0, (r.top() - _paintPadding.top())),
+			0,
+			std::min(0, (r.bottom() - _paintPadding.bottom())));
+		p.fillRect(r + padding, _bg);
+	}
 }
 
 void ContentWidget::setGeometryWithTopMoved(
@@ -191,13 +204,25 @@ void ContentWidget::applyAdditionalScroll(int additionalScroll) {
 	}
 }
 
+void ContentWidget::applyMaxVisibleHeight(int maxVisibleHeight) {
+	if (_maxVisibleHeight != maxVisibleHeight) {
+		_maxVisibleHeight = maxVisibleHeight;
+		update();
+	}
+}
+
 rpl::producer<int> ContentWidget::desiredHeightValue() const {
 	using namespace rpl::mappers;
 	return rpl::combine(
 		_innerWrap->entity()->desiredHeightValue(),
 		_scrollTopSkip.value(),
 		_scrollBottomSkip.value()
-	) | rpl::map(_1 + _2 + _3);
+	//) | rpl::map(_1 + _2 + _3);
+	) | rpl::map([=](int desired, int, int) {
+		return desired
+			+ _scrollTopSkip.current()
+			+ _scrollBottomSkip.current();
+	});
 }
 
 rpl::producer<bool> ContentWidget::desiredShadowVisibility() const {
@@ -224,6 +249,10 @@ int ContentWidget::scrollTopSave() const {
 	return _scroll->scrollTop();
 }
 
+rpl::producer<int> ContentWidget::scrollTopValue() const {
+	return _scroll->scrollTopValue();
+}
+
 void ContentWidget::scrollTopRestore(int scrollTop) {
 	_scroll->scrollToY(scrollTop);
 }
@@ -240,8 +269,44 @@ QRect ContentWidget::floatPlayerAvailableRect() const {
 	return mapToGlobal(_scroll->geometry());
 }
 
+void ContentWidget::fillTopBarMenu(const Ui::Menu::MenuCallback &addAction) {
+	const auto peer = _controller->key().peer();
+	const auto topic = _controller->key().topic();
+	if (!peer && !topic) {
+		return;
+	}
+
+	Window::FillDialogsEntryMenu(
+		_controller->parentController(),
+		Dialogs::EntryState{
+			.key = (topic
+				? Dialogs::Key{ topic }
+				: Dialogs::Key{ peer->owner().history(peer) }),
+			.section = Dialogs::EntryState::Section::Profile,
+		},
+		addAction);
+}
+
 rpl::producer<SelectedItems> ContentWidget::selectedListValue() const {
 	return rpl::single(SelectedItems(Storage::SharedMediaType::Photo));
+}
+
+void ContentWidget::setPaintPadding(const style::margins &padding) {
+	_paintPadding = padding;
+}
+
+void ContentWidget::setViewport(
+		rpl::producer<not_null<QEvent*>> &&events) const {
+	std::move(
+		events
+	) | rpl::start_with_next([=](not_null<QEvent*> e) {
+		_scroll->viewportEvent(e);
+	}, _scroll->lifetime());
+}
+
+auto ContentWidget::titleStories()
+-> rpl::producer<Dialogs::Stories::Content> {
+	return nullptr;
 }
 
 void ContentWidget::saveChanges(FnMut<void()> done) {
@@ -275,15 +340,67 @@ void ContentWidget::refreshSearchField(bool shown) {
 	}
 }
 
+int ContentWidget::scrollBottomSkip() const {
+	return _scrollBottomSkip.current();
+}
+
+rpl::producer<int> ContentWidget::scrollBottomSkipValue() const {
+	return _scrollBottomSkip.value();
+}
+
+rpl::producer<bool> ContentWidget::desiredBottomShadowVisibility() const {
+	using namespace rpl::mappers;
+	return rpl::combine(
+		_scroll->scrollTopValue(),
+		_scrollBottomSkip.value(),
+		_scroll->heightValue()
+	) | rpl::map([=](int scroll, int skip, int) {
+		return ((skip > 0) && (scroll < _scroll->scrollTopMax()));
+	});
+}
+
+not_null<Ui::ScrollArea*> ContentWidget::scroll() const {
+	return _scroll.data();
+}
+
 Key ContentMemento::key() const {
-	if (const auto peer = this->peer()) {
+	if (const auto topic = this->topic()) {
+		return Key(topic);
+	} else if (const auto peer = this->peer()) {
 		return Key(peer);
 	} else if (const auto poll = this->poll()) {
 		return Key(poll, pollContextId());
 	} else if (const auto self = settingsSelf()) {
 		return Settings::Tag{ self };
+	} else if (const auto peer = storiesPeer()) {
+		return Stories::Tag{ peer, storiesTab() };
+	} else if (const auto peer = statisticsPeer()) {
+		return Statistics::Tag{
+			peer,
+			statisticsContextId(),
+			statisticsStoryId(),
+		};
 	} else {
 		return Downloads::Tag();
+	}
+}
+
+ContentMemento::ContentMemento(
+	not_null<PeerData*> peer,
+	Data::ForumTopic *topic,
+	PeerId migratedPeerId)
+: _peer(peer)
+, _migratedPeerId((!topic && peer->migrateFrom())
+	? peer->migrateFrom()->id
+	: 0)
+, _topic(topic) {
+	if (_topic) {
+		_peer->owner().itemIdChanged(
+		) | rpl::start_with_next([=](const Data::Session::IdChange &change) {
+			if (_topic->rootId() == change.oldId) {
+				_topic = _topic->forum()->topicFor(change.newId.msg);
+			}
+		}, _lifetime);
 	}
 }
 
@@ -292,6 +409,17 @@ ContentMemento::ContentMemento(Settings::Tag settings)
 }
 
 ContentMemento::ContentMemento(Downloads::Tag downloads) {
+}
+
+ContentMemento::ContentMemento(Stories::Tag stories)
+: _storiesPeer(stories.peer)
+, _storiesTab(stories.tab) {
+}
+
+ContentMemento::ContentMemento(Statistics::Tag statistics)
+: _statisticsPeer(statistics.peer)
+, _statisticsContextId(statistics.contextId)
+, _statisticsStoryId(statistics.storyId) {
 }
 
 } // namespace Info

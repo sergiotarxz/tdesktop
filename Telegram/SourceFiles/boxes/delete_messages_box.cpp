@@ -11,6 +11,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_chat_participants.h"
 #include "api/api_messages_search.h"
 #include "base/unixtime.h"
+#include "core/application.h"
+#include "core/core_settings.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "data/data_histories.h"
@@ -26,8 +28,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/labels.h"
-#include "window/window_session_controller.h"
-#include "facades.h" // Ui::showChatsList
+#include "ui/wrap/slide_wrap.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
 
@@ -80,7 +81,7 @@ DeleteMessagesBox::DeleteMessagesBox(
 void DeleteMessagesBox::prepare() {
 	auto details = TextWithEntities();
 	const auto appendDetails = [&](TextWithEntities &&text) {
-		details.append(qstr("\n\n")).append(std::move(text));
+		details.append(u"\n\n"_q).append(std::move(text));
 	};
 	auto deleteText = lifetime().make_state<rpl::variable<QString>>();
 	*deleteText = tr::lng_box_delete();
@@ -121,20 +122,29 @@ void DeleteMessagesBox::prepare() {
 				: peer->isSelf()
 				? tr::lng_sure_delete_saved_messages(tr::now)
 				: peer->isUser()
-				? tr::lng_sure_delete_history(tr::now, lt_contact, peer->name)
+				? tr::lng_sure_delete_history(
+					tr::now,
+					lt_contact,
+					peer->name())
 				: tr::lng_sure_delete_group_history(
 					tr::now,
 					lt_group,
-					peer->name);
+					peer->name());
 			details = Ui::Text::RichLangValue(details.text);
 			deleteStyle = &st::attentionBoxButton;
 		} else {
 			details.text = peer->isSelf()
 				? tr::lng_sure_delete_saved_messages(tr::now)
 				: peer->isUser()
-				? tr::lng_sure_delete_history(tr::now, lt_contact, peer->name)
+				? tr::lng_sure_delete_history(
+					tr::now,
+					lt_contact,
+					peer->name())
 				: peer->isChat()
-				? tr::lng_sure_delete_and_exit(tr::now, lt_group, peer->name)
+				? tr::lng_sure_delete_and_exit(
+					tr::now,
+					lt_group,
+					peer->name())
 				: peer->isMegagroup()
 				? tr::lng_sure_leave_group(tr::now)
 				: tr::lng_sure_leave_channel(tr::now);
@@ -190,7 +200,7 @@ void DeleteMessagesBox::prepare() {
 				tr::lng_delete_all_from_user(
 					tr::now,
 					lt_user,
-					Ui::Text::Bold(_moderateFrom->name),
+					Ui::Text::Bold(_moderateFrom->name()),
 					Ui::Text::WithEntities),
 				false,
 				st::defaultBoxCheckbox);
@@ -211,7 +221,7 @@ void DeleteMessagesBox::prepare() {
 						? QString()
 						: QString(" (%1)").arg(total));
 			});
-			search->searchMessages(QString(), _moderateFrom);
+			search->searchMessages({ .from = _moderateFrom });
 		}
 	} else {
 		details.text = (_ids.size() == 1)
@@ -221,11 +231,32 @@ void DeleteMessagesBox::prepare() {
 			auto count = int(_ids.size());
 			if (hasScheduledMessages()) {
 			} else if (auto revoke = revokeText(peer)) {
+				const auto &settings = Core::App().settings();
+				const auto revokeByDefault =
+					!settings.rememberedDeleteMessageOnlyForYou();
 				_revoke.create(
 					this,
 					revoke->checkbox,
-					false,
+					revokeByDefault,
 					st::defaultBoxCheckbox);
+				_revokeRemember.create(
+					this,
+					object_ptr<Ui::Checkbox>(
+						this,
+						tr::lng_remember(),
+						false,
+						st::defaultBoxCheckbox));
+				_revokeRemember->hide(anim::type::instant);
+				_revoke->checkedValue(
+				) | rpl::start_with_next([=](bool checked) {
+					_revokeRemember->toggle(
+						checked != revokeByDefault,
+						anim::type::normal);
+				}, _revokeRemember->lifetime());
+				_revokeRemember->heightValue(
+				) | rpl::start_with_next([=](int h) {
+					setDimensions(st::boxWidth, _fullHeight + h);
+				}, lifetime());
 				appendDetails(std::move(revoke->description));
 			} else if (peer->isChannel()) {
 				if (peer->isMegagroup()) {
@@ -241,6 +272,9 @@ void DeleteMessagesBox::prepare() {
 					tr::lng_delete_for_me_chat_hint(tr::now, lt_count, count)
 				});
 			} else if (!peer->isSelf()) {
+				if (const auto user = peer->asUser(); user && user->isBot()) {
+					_revokeForBot = true;
+				}
 				appendDetails({
 					tr::lng_delete_for_me_hint(tr::now, lt_count, count)
 				});
@@ -251,7 +285,7 @@ void DeleteMessagesBox::prepare() {
 
 	if (_wipeHistoryJustClear && _wipeHistoryPeer) {
 		const auto validator = TTLMenu::TTLValidator(
-			std::make_shared<Ui::BoxShow>(this),
+			uiShow(),
 			_wipeHistoryPeer);
 		if (validator.can()) {
 			_wipeHistoryPeer->updateFull();
@@ -298,6 +332,7 @@ void DeleteMessagesBox::prepare() {
 			+ st::boxLittleSkip;
 	}
 	setDimensions(st::boxWidth, fullHeight);
+	_fullHeight = fullHeight;
 }
 
 bool DeleteMessagesBox::hasScheduledMessages() const {
@@ -338,8 +373,6 @@ auto DeleteMessagesBox::revokeText(not_null<PeerData*> peer) const
 				lt_user,
 				{ user->firstName },
 				Ui::Text::RichLangValue);
-		} else if (_wipeHistoryJustClear) {
-			return std::nullopt;
 		} else {
 			result.checkbox.text = tr::lng_delete_for_everyone_check(tr::now);
 		}
@@ -441,6 +474,11 @@ void DeleteMessagesBox::resizeEvent(QResizeEvent *e) {
 		_revoke->resizeToNaturalWidth(availableWidth);
 		_revoke->moveToLeft(padding.left(), top);
 		top += _revoke->heightNoMargins() + st::boxLittleSkip;
+		if (_revokeRemember) {
+			_revokeRemember->resizeToNaturalWidth(availableWidth);
+			_revokeRemember->moveToLeft(padding.left(),top);
+			top += _revokeRemember->heightNoMargins();
+		}
 	}
 	if (_autoDeleteSettings) {
 		top += st::boxMediumSkip - st::boxLittleSkip;
@@ -460,7 +498,15 @@ void DeleteMessagesBox::keyPressEvent(QKeyEvent *e) {
 }
 
 void DeleteMessagesBox::deleteAndClear() {
-	const auto revoke = _revoke ? _revoke->checked() : false;
+	if (_revoke
+		&& _revokeRemember
+		&& _revokeRemember->toggled()
+		&& _revokeRemember->entity()->checked()) {
+		Core::App().settings().setRememberedDeleteMessageOnlyForYou(
+			!_revoke->checked());
+		Core::App().saveSettingsDelayed();
+	}
+	const auto revoke = _revoke ? _revoke->checked() : _revokeForBot;
 	const auto session = _session;
 	const auto invokeCallbackAndClose = [&] {
 		// deleteMessages can initiate closing of the current section,
@@ -493,11 +539,7 @@ void DeleteMessagesBox::deleteAndClear() {
 		if (justClear) {
 			session->api().clearHistory(peer, revoke);
 		} else {
-			for (const auto &controller : session->windows()) {
-				if (controller->activeChatCurrent().peer() == peer) {
-					Ui::showChatsList(session);
-				}
-			}
+			Core::App().closeChatFromWindows(peer);
 			// Don't delete old history by default,
 			// because Android app doesn't.
 			//

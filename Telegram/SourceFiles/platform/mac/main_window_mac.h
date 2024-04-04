@@ -30,8 +30,6 @@ public:
 
 	void updateWindowIcon() override;
 
-	bool preventsQuit(Core::QuitReason reason) override;
-
 	class Private;
 
 protected:
@@ -50,7 +48,7 @@ private:
 	friend class Private;
 
 	void hideAndDeactivate();
-	void updateIconCounters();
+	void updateDockCounter();
 
 	std::unique_ptr<Private> _private;
 
@@ -80,11 +78,16 @@ private:
 	QAction *psItalic = nullptr;
 	QAction *psUnderline = nullptr;
 	QAction *psStrikeOut = nullptr;
+	QAction *psBlockquote = nullptr;
 	QAction *psMonospace = nullptr;
 	QAction *psClearFormat = nullptr;
 
 	int _customTitleHeight = 0;
 
 };
+
+[[nodiscard]] inline int32 ScreenNameChecksum(const QString &name) {
+	return Window::DefaultScreenNameChecksum(name);
+}
 
 } // namespace Platform

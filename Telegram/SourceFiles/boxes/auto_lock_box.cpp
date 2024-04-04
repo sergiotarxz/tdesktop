@@ -8,6 +8,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/auto_lock_box.h"
 
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "lang/lang_keys.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/time_input.h"
@@ -80,9 +81,9 @@ void AutoLockBox::prepare() {
 
 		const auto timeInput = Ui::CreateChild<Ui::TimeInput>(
 			this,
-			(group->value() == kCustom)
+			(group->current() == kCustom
 				? TimeString(currentTime)
-				: kDefaultCustom.utf8(),
+				: kDefaultCustom.utf8()),
 			st::autolockTimeField,
 			st::autolockDateField,
 			st::scheduleTimeSeparator,
@@ -114,7 +115,9 @@ void AutoLockBox::prepare() {
 	});
 
 	rpl::merge(
-		boxClosing() | rpl::filter([=] { return group->value() == kCustom; }),
+		boxClosing() | rpl::filter(
+			[=] { return group->current() == kCustom; }
+		),
 		timeInput->submitRequests()
 	) | rpl::start_with_next([=] {
 		if (const auto result = collect()) {

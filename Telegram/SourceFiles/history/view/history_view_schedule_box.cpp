@@ -10,12 +10,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "api/api_common.h"
 #include "data/data_peer.h"
 #include "data/data_user.h"
-#include "data/data_scheduled_messages.h" // kScheduledUntilOnlineTimestamp
 #include "lang/lang_keys.h"
 #include "base/event_filter.h"
 #include "base/qt/qt_key_modifiers.h"
 #include "base/unixtime.h"
-#include "ui/widgets/input_fields.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/popup_menu.h"
@@ -60,10 +59,12 @@ TimeId DefaultScheduleTime() {
 }
 
 bool CanScheduleUntilOnline(not_null<PeerData*> peer) {
-	return !peer->isSelf()
-		&& peer->isUser()
-		&& !peer->asUser()->isBot()
-		&& (peer->asUser()->onlineTill > 0);
+	if (const auto user = peer->asUser()) {
+		return !user->isSelf()
+			&& !user->isBot()
+			&& !user->lastseen().isHidden();
+	}
+	return false;
 }
 
 void ScheduleBox(
@@ -94,16 +95,17 @@ void ScheduleBox(
 		.style = style.chooseDateTimeArgs,
 	});
 
+	using T = SendMenu::Type;
 	SendMenu::SetupMenuAndShortcuts(
 		descriptor.submit.data(),
-		[=] { return SendMenu::Type::SilentOnly; },
+		[t = type == T::Disabled ? T::Disabled : T::SilentOnly] { return t; },
 		[=] { save(true, descriptor.collect()); },
+		nullptr,
 		nullptr);
 
 	if (type == SendMenu::Type::ScheduledToUser) {
 		const auto sendUntilOnline = box->addTopButton(*style.topButtonStyle);
-		const auto timestamp
-			= Data::ScheduledMessages::kScheduledUntilOnlineTimestamp;
+		const auto timestamp = Api::kScheduledUntilOnlineTimestamp;
 		FillSendUntilOnlineMenu(
 			sendUntilOnline.data(),
 			[=] { save(false, timestamp); },

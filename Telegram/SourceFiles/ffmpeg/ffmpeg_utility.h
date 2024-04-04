@@ -19,7 +19,11 @@ extern "C" {
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libswscale/swscale.h>
+#include <libavutil/version.h>
 } // extern "C"
+
+#define DA_FFMPEG_NEW_CHANNEL_LAYOUT (LIBAVUTIL_VERSION_MAJOR > 57 \
+	|| (LIBAVUTIL_VERSION_MAJOR == 57 && LIBAVUTIL_VERSION_MINOR >= 28))
 
 class QImage;
 
@@ -137,6 +141,7 @@ struct FrameDeleter {
 };
 using FramePointer = std::unique_ptr<AVFrame, FrameDeleter>;
 [[nodiscard]] FramePointer MakeFramePointer();
+[[nodiscard]] FramePointer DuplicateFramePointer(AVFrame *frame);
 [[nodiscard]] bool FrameHasData(AVFrame *frame);
 void ClearFrameMemory(AVFrame *frame);
 
@@ -160,8 +165,8 @@ using SwscalePointer = std::unique_ptr<SwsContext, SwscaleDeleter>;
 	QSize resize,
 	SwscalePointer *existing = nullptr);
 
-void LogError(QLatin1String method);
-void LogError(QLatin1String method, FFmpeg::AvErrorWrap error);
+void LogError(const QString &method);
+void LogError(const QString &method, FFmpeg::AvErrorWrap error);
 
 [[nodiscard]] const AVCodec *FindDecoder(not_null<AVCodecContext*> context);
 [[nodiscard]] crl::time PtsToTime(int64_t pts, AVRational timeBase);
@@ -180,6 +185,7 @@ void LogError(QLatin1String method, FFmpeg::AvErrorWrap error);
 [[nodiscard]] int ReadRotationFromMetadata(not_null<AVStream*> stream);
 [[nodiscard]] AVRational ValidateAspectRatio(AVRational aspect);
 [[nodiscard]] bool RotationSwapWidthHeight(int rotation);
+[[nodiscard]] QSize TransposeSizeByRotation(QSize size, int rotation);
 [[nodiscard]] QSize CorrectByAspect(QSize size, AVRational aspect);
 
 [[nodiscard]] bool GoodStorageForFrame(const QImage &storage, QSize size);

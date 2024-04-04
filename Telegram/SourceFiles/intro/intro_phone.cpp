@@ -21,19 +21,27 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "main/main_session.h"
 #include "data/data_user.h"
 #include "ui/boxes/confirm_box.h"
+#include "boxes/abstract_box.h"
 #include "boxes/phone_banned_box.h"
 #include "core/application.h"
+#include "window/window_controller.h"
+#include "window/window_session_controller.h"
 #include "countries/countries_instance.h" // Countries::Groups
 
 namespace Intro {
 namespace details {
 namespace {
 
-bool AllowPhoneAttempt(const QString &phone) {
+[[nodiscard]] bool AllowPhoneAttempt(const QString &phone) {
 	const auto digits = ranges::count_if(
 		phone,
 		[](QChar ch) { return ch.isNumber(); });
 	return (digits > 1);
+}
+
+[[nodiscard]] QString DigitsOnly(QString value) {
+	static const auto RegExp = QRegularExpression("[^0-9]");
+	return value.replace(RegExp, QString());
 }
 
 } // namespace
@@ -43,7 +51,10 @@ PhoneWidget::PhoneWidget(
 	not_null<Main::Account*> account,
 	not_null<Data*> data)
 : Step(parent, account, data)
-, _country(this, st::introCountry)
+, _country(
+	this,
+	getData()->controller->uiShow(),
+	st::introCountry)
 , _code(this, st::introCountryCode)
 , _phone(
 	this,
@@ -82,7 +93,7 @@ PhoneWidget::PhoneWidget(
 	setupQrLogin();
 
 	if (!_country->chooseCountry(getData()->country)) {
-		_country->chooseCountry(qsl("US"));
+		_country->chooseCountry(u"US"_q);
 	}
 	_changed = false;
 }
@@ -142,6 +153,16 @@ void PhoneWidget::submit() {
 		return;
 	}
 
+	{
+		const auto hasCodeButWaitingPhone = _code->hasFocus()
+			&& (_code->getLastText().size() > 1)
+			&& _phone->getLastText().isEmpty();
+		if (hasCodeButWaitingPhone) {
+			_phone->hideError();
+			_phone->setFocus();
+			return;
+		}
+	}
 	const auto phone = fullNumber();
 	if (!AllowPhoneAttempt(phone)) {
 		showPhoneError(tr::lng_bad_phone());
@@ -152,15 +173,12 @@ void PhoneWidget::submit() {
 	cancelNearestDcRequest();
 
 	// Check if such account is authorized already.
-	const auto digitsOnly = [](QString value) {
-		return value.replace(QRegularExpression("[^0-9]"), QString());
-	};
-	const auto phoneDigits = digitsOnly(phone);
+	const auto phoneDigits = DigitsOnly(phone);
 	for (const auto &[index, existing] : Core::App().domain().accounts()) {
 		const auto raw = existing.get();
 		if (const auto session = raw->maybeSession()) {
 			if (raw->mtp().environment() == account().mtp().environment()
-				&& digitsOnly(session->user()->phone()) == phoneDigits) {
+				&& DigitsOnly(session->user()->phone()) == phoneDigits) {
 				crl::on_main(raw, [=] {
 					Core::App().domain().activate(raw);
 				});
@@ -179,7 +197,11 @@ void PhoneWidget::submit() {
 		MTP_string(_sentPhone),
 		MTP_int(ApiId),
 		MTP_string(ApiHash),
-		MTP_codeSettings(MTP_flags(0), MTP_vector<MTPbytes>())
+		MTP_codeSettings(
+			MTP_flags(0),
+			MTPVector<MTPbytes>(),
+			MTPstring(),
+			MTPBool())
 	)).done([=](const MTPauth_SentCode &result) {
 		phoneSubmitDone(result);
 	}).fail([=](const MTP::Error &error) {
@@ -208,24 +230,22 @@ void PhoneWidget::phoneSubmitDone(const MTPauth_SentCode &result) {
 	stopCheck();
 	_sentRequest = 0;
 
-	if (result.type() != mtpc_auth_sentCode) {
-		showPhoneError(rpl::single(Lang::Hard::ServerError()));
-		return;
-	}
-
-	const auto &d = result.c_auth_sentCode();
-	fillSentCodeData(d);
-	getData()->phone = _sentPhone;
-	getData()->phoneHash = qba(d.vphone_code_hash());
-	const auto next = d.vnext_type();
-	if (next && next->type() == mtpc_auth_codeTypeCall) {
-		getData()->callStatus = CallStatus::Waiting;
-		getData()->callTimeout = d.vtimeout().value_or(60);
-	} else {
-		getData()->callStatus = CallStatus::Disabled;
-		getData()->callTimeout = 0;
-	}
-	goNext<CodeWidget>();
+	result.match([&](const MTPDauth_sentCode &data) {
+		fillSentCodeData(data);
+		getData()->phone = DigitsOnly(_sentPhone);
+		getData()->phoneHash = qba(data.vphone_code_hash());
+		const auto next = data.vnext_type();
+		if (next && next->type() == mtpc_auth_codeTypeCall) {
+			getData()->callStatus = CallStatus::Waiting;
+			getData()->callTimeout = data.vtimeout().value_or(60);
+		} else {
+			getData()->callStatus = CallStatus::Disabled;
+			getData()->callTimeout = 0;
+		}
+		goNext<CodeWidget>();
+	}, [&](const MTPDauth_sentCodeSuccess &data) {
+		finish(data.vauthorization());
+	});
 }
 
 void PhoneWidget::phoneSubmitFail(const MTP::Error &error) {
@@ -239,11 +259,11 @@ void PhoneWidget::phoneSubmitFail(const MTP::Error &error) {
 	stopCheck();
 	_sentRequest = 0;
 	auto &err = error.type();
-	if (err == qstr("PHONE_NUMBER_FLOOD")) {
+	if (err == u"PHONE_NUMBER_FLOOD"_q) {
 		Ui::show(Ui::MakeInformBox(tr::lng_error_phone_flood()));
-	} else if (err == qstr("PHONE_NUMBER_INVALID")) { // show error
+	} else if (err == u"PHONE_NUMBER_INVALID"_q) { // show error
 		showPhoneError(tr::lng_bad_phone());
-	} else if (err == qstr("PHONE_NUMBER_BANNED")) {
+	} else if (err == u"PHONE_NUMBER_BANNED"_q) {
 		Ui::ShowPhoneBannedError(getData()->controller, _sentPhone);
 	} else if (Logs::DebugEnabled()) { // internal server error
 		showPhoneError(rpl::single(err + ": " + error.description()));

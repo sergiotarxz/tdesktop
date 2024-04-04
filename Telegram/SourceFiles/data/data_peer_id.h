@@ -16,6 +16,7 @@ using PeerIdZero = void(PeerIdZeroHelper::*)();
 template <uint8 Shift>
 struct ChatIdType {
 	BareId bare = 0;
+
 	static constexpr BareId kShift = Shift;
 	static constexpr BareId kReservedBit = BareId(0x80);
 	static_assert((Shift & kReservedBit) == 0, "Last bit is reserved.");
@@ -28,6 +29,10 @@ struct ChatIdType {
 	constexpr ChatIdType(MTPlong value) noexcept : bare(value.v) {
 	}
 
+	friend inline constexpr auto operator<=>(
+		ChatIdType,
+		ChatIdType) = default;
+
 	[[nodiscard]] constexpr explicit operator bool() const noexcept {
 		return (bare != 0);
 	}
@@ -36,48 +41,6 @@ struct ChatIdType {
 	}
 
 };
-
-template <uchar Shift>
-[[nodiscard]] inline constexpr bool operator==(
-		ChatIdType<Shift> a,
-		ChatIdType<Shift> b) noexcept {
-	return (a.bare == b.bare);
-}
-
-template <uchar Shift>
-[[nodiscard]] inline constexpr bool operator!=(
-		ChatIdType<Shift> a,
-		ChatIdType<Shift> b) noexcept {
-	return (a.bare != b.bare);
-}
-
-template <uchar Shift>
-[[nodiscard]] inline constexpr bool operator<(
-		ChatIdType<Shift> a,
-		ChatIdType<Shift> b) noexcept {
-	return (a.bare < b.bare);
-}
-
-template <uchar Shift>
-[[nodiscard]] inline constexpr bool operator>(
-		ChatIdType<Shift> a,
-		ChatIdType<Shift> b) noexcept {
-	return (a.bare > b.bare);
-}
-
-template <uchar Shift>
-[[nodiscard]] inline constexpr bool operator<=(
-		ChatIdType<Shift> a,
-		ChatIdType<Shift> b) noexcept {
-	return (a.bare <= b.bare);
-}
-
-template <uchar Shift>
-[[nodiscard]] inline constexpr bool operator>=(
-		ChatIdType<Shift> a,
-		ChatIdType<Shift> b) noexcept {
-	return (a.bare >= b.bare);
-}
 
 template <uchar Shift>
 [[nodiscard]] inline constexpr bool operator==(
@@ -159,6 +122,8 @@ struct PeerId {
 	constexpr PeerId(PeerIdHelper value) noexcept : value(value.value) {
 	}
 
+	friend inline constexpr auto operator<=>(PeerId, PeerId) = default;
+
 	template <typename SomeChatIdType, BareId = SomeChatIdType::kShift>
 	[[nodiscard]] constexpr bool is() const noexcept {
 		if (EncryptedId::kShift == SomeChatIdType::kShift) {
@@ -180,30 +145,6 @@ struct PeerId {
 	}
 
 };
-
-[[nodiscard]] inline constexpr bool operator==(PeerId a, PeerId b) noexcept {
-	return (a.value == b.value);
-}
-
-[[nodiscard]] inline constexpr bool operator!=(PeerId a, PeerId b) noexcept {
-	return (a.value != b.value);
-}
-
-[[nodiscard]] inline constexpr bool operator<(PeerId a, PeerId b) noexcept {
-	return (a.value < b.value);
-}
-
-[[nodiscard]] inline constexpr bool operator>(PeerId a, PeerId b) noexcept {
-	return (a.value > b.value);
-}
-
-[[nodiscard]] inline constexpr bool operator<=(PeerId a, PeerId b) noexcept {
-	return (a.value <= b.value);
-}
-
-[[nodiscard]] inline constexpr bool operator>=(PeerId a, PeerId b) noexcept {
-	return (a.value >= b.value);
-}
 
 [[nodiscard]] inline constexpr bool operator==(
 		PeerId a,

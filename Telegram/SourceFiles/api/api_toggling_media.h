@@ -7,13 +7,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+namespace ChatHelpers {
+class Show;
+} // namespace ChatHelpers
+
 namespace Api {
 
 void ToggleFavedSticker(
+	std::shared_ptr<ChatHelpers::Show> show,
 	not_null<DocumentData*> document,
 	Data::FileOrigin origin);
 
 void ToggleFavedSticker(
+	std::shared_ptr<ChatHelpers::Show> show,
 	not_null<DocumentData*> document,
 	Data::FileOrigin origin,
 	bool faved);
@@ -24,6 +30,7 @@ void ToggleRecentSticker(
 	bool saved);
 
 void ToggleSavedGif(
+	std::shared_ptr<ChatHelpers::Show> show,
 	not_null<DocumentData*> document,
 	Data::FileOrigin origin,
 	bool saved);

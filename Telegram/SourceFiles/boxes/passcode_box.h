@@ -7,7 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "boxes/abstract_box.h"
+#include "ui/layers/box_content.h"
 #include "mtproto/sender.h"
 #include "core/core_cloud_password.h"
 
@@ -90,7 +90,6 @@ private:
 	void closeReplacedBy();
 	void oldChanged();
 	void newChanged();
-	void emailChanged();
 	void save(bool force = false);
 	void badOldPasscode();
 	void recoverByEmail();

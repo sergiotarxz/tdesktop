@@ -7,6 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/local_storage_box.h"
 
+#include "boxes/abstract_box.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/widgets/labels.h"
@@ -242,7 +243,7 @@ void LocalStorageBox::Row::paintEvent(QPaintEvent *e) {
 	if (!_progress || true) {
 		return;
 	}
-	Painter p(this);
+	auto p = QPainter(this);
 	const auto padding = st::localStorageRowPadding;
 	const auto height = st::localStorageRowHeight;
 	const auto bottom = height - padding.bottom() - _description->height();
@@ -594,13 +595,4 @@ void LocalStorageBox::save() {
 	_session->local().updateCacheSettings(update, updateBig);
 	_session->data().cache().updateSettings(update);
 	closeBox();
-}
-
-void LocalStorageBox::paintEvent(QPaintEvent *e) {
-	BoxContent::paintEvent(e);
-
-	Painter p(this);
-
-	p.setFont(st::boxTextFont);
-	p.setPen(st::windowFg);
 }

@@ -7,11 +7,17 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "settings/settings_common.h"
+#include "settings/settings_common_session.h"
 
-namespace Dialogs::Ui {
+class UserData;
+
+namespace Ui {
 struct UnreadBadgeStyle;
-} // namespace Dialogs::Ui
+} // namespace Ui
+
+namespace Main {
+class Account;
+} // namespace Main
 
 namespace Settings {
 
@@ -29,20 +35,30 @@ private:
 };
 
 struct AccountsEvents {
-	rpl::producer<> currentAccountActivations;
+	rpl::producer<> closeRequests;
 };
 AccountsEvents SetupAccounts(
 	not_null<Ui::VerticalLayout*> container,
 	not_null<Window::SessionController*> controller);
 
-[[nodiscard]] Dialogs::Ui::UnreadBadgeStyle BadgeStyle();
+void UpdatePhotoLocally(not_null<UserData*> user, const QImage &image);
+
+namespace Badge {
+
+[[nodiscard]] Ui::UnreadBadgeStyle Style();
 
 struct UnreadBadge {
 	int count = 0;
 	bool muted = false;
 };
-void AddUnreadBadge(
+[[nodiscard]] not_null<Ui::RpWidget*> AddRight(
+	not_null<Ui::SettingsButton*> button);
+[[nodiscard]] not_null<Ui::RpWidget*> CreateUnread(
+	not_null<Ui::RpWidget*> container,
+	rpl::producer<UnreadBadge> value);
+void AddUnread(
 	not_null<Ui::SettingsButton*> button,
 	rpl::producer<UnreadBadge> value);
 
+} // namespace Badge
 } // namespace Settings

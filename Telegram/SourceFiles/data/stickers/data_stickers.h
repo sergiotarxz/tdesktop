@@ -18,10 +18,26 @@ namespace Main {
 class Session;
 } // namespace Main
 
+namespace Window {
+class SessionController;
+} // namespace Window
+
+namespace ChatHelpers {
+class Show;
+} // namespace ChatHelpers
+
 namespace Data {
 
 class Session;
 class DocumentMedia;
+
+enum class StickersType : uchar {
+	Stickers,
+	Masks,
+	Emoji,
+};
+[[nodiscard]] StickerType ThumbnailTypeFromPhotoSize(
+	const MTPPhotoSize &size);
 
 class Stickers final {
 public:
@@ -49,71 +65,82 @@ public:
 	// For setting up megagroup sticker set.
 	static constexpr auto MegagroupSetId = 0xFFFFFFFFFFFFFFEFULL;
 
-	enum Recent {
-		Regular,
-		Attached,
-	};
-
-	void notifyUpdated();
-	[[nodiscard]] rpl::producer<> updated() const;
-	void notifyRecentUpdated(Recent recent = Recent::Regular);
-	[[nodiscard]] rpl::producer<Recent> recentUpdated() const;
+	void notifyUpdated(StickersType type);
+	[[nodiscard]] rpl::producer<StickersType> updated() const;
+	[[nodiscard]] rpl::producer<> updated(StickersType type) const;
+	void notifyRecentUpdated(StickersType type);
+	[[nodiscard]] rpl::producer<StickersType> recentUpdated() const;
+	[[nodiscard]] rpl::producer<> recentUpdated(StickersType type) const;
 	void notifySavedGifsUpdated();
 	[[nodiscard]] rpl::producer<> savedGifsUpdated() const;
 	void notifyStickerSetInstalled(uint64 setId);
 	[[nodiscard]] rpl::producer<uint64> stickerSetInstalled() const;
+	void notifyEmojiSetInstalled(uint64 setId);
+	[[nodiscard]] rpl::producer<uint64> emojiSetInstalled() const;
 
 	void incrementSticker(not_null<DocumentData*> document);
 
-	bool updateNeeded(crl::time now) const {
+	[[nodiscard]] bool updateNeeded(crl::time now) const {
 		return updateNeeded(_lastUpdate, now);
 	}
 	void setLastUpdate(crl::time update) {
 		_lastUpdate = update;
 	}
-	bool recentUpdateNeeded(crl::time now) const {
+	[[nodiscard]] bool recentUpdateNeeded(crl::time now) const {
 		return updateNeeded(_lastRecentUpdate, now);
 	}
 	void setLastRecentUpdate(crl::time update) {
 		if (update) {
-			notifyRecentUpdated();
+			notifyRecentUpdated(StickersType::Stickers);
 		}
 		_lastRecentUpdate = update;
 	}
-	bool masksUpdateNeeded(crl::time now) const {
+	[[nodiscard]] bool masksUpdateNeeded(crl::time now) const {
 		return updateNeeded(_lastMasksUpdate, now);
 	}
 	void setLastMasksUpdate(crl::time update) {
 		_lastMasksUpdate = update;
 	}
-	bool recentAttachedUpdateNeeded(crl::time now) const {
+	[[nodiscard]] bool emojiUpdateNeeded(crl::time now) const {
+		return updateNeeded(_lastEmojiUpdate, now);
+	}
+	void setLastEmojiUpdate(crl::time update) {
+		_lastEmojiUpdate = update;
+	}
+	[[nodiscard]] bool recentAttachedUpdateNeeded(crl::time now) const {
 		return updateNeeded(_lastRecentAttachedUpdate, now);
 	}
 	void setLastRecentAttachedUpdate(crl::time update) {
 		if (update) {
-			notifyRecentUpdated(Recent::Attached);
+			notifyRecentUpdated(StickersType::Masks);
 		}
 		_lastRecentAttachedUpdate = update;
 	}
-	bool favedUpdateNeeded(crl::time now) const {
+	[[nodiscard]] bool favedUpdateNeeded(crl::time now) const {
 		return updateNeeded(_lastFavedUpdate, now);
 	}
 	void setLastFavedUpdate(crl::time update) {
 		_lastFavedUpdate = update;
 	}
-	bool featuredUpdateNeeded(crl::time now) const {
+	[[nodiscard]] bool featuredUpdateNeeded(crl::time now) const {
 		return updateNeeded(_lastFeaturedUpdate, now);
 	}
 	void setLastFeaturedUpdate(crl::time update) {
 		_lastFeaturedUpdate = update;
 	}
-	bool savedGifsUpdateNeeded(crl::time now) const {
+	[[nodiscard]] bool featuredEmojiUpdateNeeded(crl::time now) const {
+		return updateNeeded(_lastFeaturedEmojiUpdate, now);
+	}
+	void setLastFeaturedEmojiUpdate(crl::time update) {
+		_lastFeaturedEmojiUpdate = update;
+	}
+	[[nodiscard]] bool savedGifsUpdateNeeded(crl::time now) const {
 		return updateNeeded(_lastSavedGifsUpdate, now);
 	}
 	void setLastSavedGifsUpdate(crl::time update) {
 		_lastSavedGifsUpdate = update;
 	}
-	int featuredSetsUnreadCount() const {
+	[[nodiscard]] int featuredSetsUnreadCount() const {
 		return _featuredSetsUnreadCount.current();
 	}
 	void setFeaturedSetsUnreadCount(int count) {
@@ -122,62 +149,80 @@ public:
 	[[nodiscard]] rpl::producer<int> featuredSetsUnreadCountValue() const {
 		return _featuredSetsUnreadCount.value();
 	}
-	const StickersSets &sets() const {
+	[[nodiscard]] const StickersSets &sets() const {
 		return _sets;
 	}
-	StickersSets &setsRef() {
+	[[nodiscard]] StickersSets &setsRef() {
 		return _sets;
 	}
-	const StickersSetsOrder &setsOrder() const {
+	[[nodiscard]] const StickersSetsOrder &setsOrder() const {
 		return _setsOrder;
 	}
-	StickersSetsOrder &setsOrderRef() {
+	[[nodiscard]] StickersSetsOrder &setsOrderRef() {
 		return _setsOrder;
 	}
-	const StickersSetsOrder &maskSetsOrder() const {
+	[[nodiscard]] const StickersSetsOrder &maskSetsOrder() const {
 		return _maskSetsOrder;
 	}
-	StickersSetsOrder &maskSetsOrderRef() {
+	[[nodiscard]] StickersSetsOrder &maskSetsOrderRef() {
 		return _maskSetsOrder;
 	}
-	const StickersSetsOrder &featuredSetsOrder() const {
+	[[nodiscard]] const StickersSetsOrder &emojiSetsOrder() const {
+		return _emojiSetsOrder;
+	}
+	[[nodiscard]] StickersSetsOrder &emojiSetsOrderRef() {
+		return _emojiSetsOrder;
+	}
+	[[nodiscard]] const StickersSetsOrder &featuredSetsOrder() const {
 		return _featuredSetsOrder;
 	}
-	StickersSetsOrder &featuredSetsOrderRef() {
+	[[nodiscard]] StickersSetsOrder &featuredSetsOrderRef() {
 		return _featuredSetsOrder;
 	}
-	const StickersSetsOrder &archivedSetsOrder() const {
+	[[nodiscard]] const StickersSetsOrder &featuredEmojiSetsOrder() const {
+		return _featuredEmojiSetsOrder;
+	}
+	[[nodiscard]] StickersSetsOrder &featuredEmojiSetsOrderRef() {
+		return _featuredEmojiSetsOrder;
+	}
+	[[nodiscard]] const StickersSetsOrder &archivedSetsOrder() const {
 		return _archivedSetsOrder;
 	}
-	StickersSetsOrder &archivedSetsOrderRef() {
+	[[nodiscard]] StickersSetsOrder &archivedSetsOrderRef() {
 		return _archivedSetsOrder;
 	}
-	const StickersSetsOrder &archivedMaskSetsOrder() const {
+	[[nodiscard]] const StickersSetsOrder &archivedMaskSetsOrder() const {
 		return _archivedMaskSetsOrder;
 	}
-	StickersSetsOrder &archivedMaskSetsOrderRef() {
+	[[nodiscard]] StickersSetsOrder &archivedMaskSetsOrderRef() {
 		return _archivedMaskSetsOrder;
 	}
-	const SavedGifs &savedGifs() const {
+	[[nodiscard]] const SavedGifs &savedGifs() const {
 		return _savedGifs;
 	}
-	SavedGifs &savedGifsRef() {
+	[[nodiscard]] SavedGifs &savedGifsRef() {
 		return _savedGifs;
 	}
 	void removeFromRecentSet(not_null<DocumentData*> document);
 
-	void addSavedGif(not_null<DocumentData*> document);
+	void addSavedGif(
+		std::shared_ptr<ChatHelpers::Show> show,
+		not_null<DocumentData*> document);
 	void checkSavedGif(not_null<HistoryItem*> item);
 
 	void applyArchivedResult(
 		const MTPDmessages_stickerSetInstallResultArchive &d);
 	void installLocally(uint64 setId);
 	void undoInstallLocally(uint64 setId);
-	bool isFaved(not_null<const DocumentData*> document);
-	void setFaved(not_null<DocumentData*> document, bool faved);
+	[[nodiscard]] bool isFaved(not_null<const DocumentData*> document) const;
+	void setFaved(
+		std::shared_ptr<ChatHelpers::Show> show,
+		not_null<DocumentData*> document,
+		bool faved);
 
 	void setsReceived(const QVector<MTPStickerSet> &data, uint64 hash);
 	void masksReceived(const QVector<MTPStickerSet> &data, uint64 hash);
+	void emojiReceived(const QVector<MTPStickerSet> &data, uint64 hash);
 	void specialSetReceived(
 		uint64 setId,
 		const QString &setTitle,
@@ -185,71 +230,92 @@ public:
 		uint64 hash,
 		const QVector<MTPStickerPack> &packs = QVector<MTPStickerPack>(),
 		const QVector<MTPint> &usageDates = QVector<MTPint>());
-	void featuredSetsReceived(
-		const QVector<MTPStickerSetCovered> &list,
-		const QVector<MTPlong> &unread,
-		uint64 hash);
+	void featuredSetsReceived(const MTPmessages_FeaturedStickers &result);
+	void featuredEmojiSetsReceived(
+		const MTPmessages_FeaturedStickers &result);
 	void gifsReceived(const QVector<MTPDocument> &items, uint64 hash);
 
-	std::vector<not_null<DocumentData*>> getListByEmoji(
-		not_null<EmojiPtr> emoji,
-		uint64 seed);
-	std::optional<std::vector<not_null<EmojiPtr>>> getEmojiListFromSet(
-		not_null<DocumentData*> document);
+	[[nodiscard]] std::vector<not_null<DocumentData*>> getListByEmoji(
+		std::vector<EmojiPtr> emoji,
+		uint64 seed,
+		bool forceAllResults = false);
+	[[nodiscard]] auto getEmojiListFromSet(not_null<DocumentData*> document)
+		-> std::optional<std::vector<not_null<EmojiPtr>>>;
 
-	StickersSet *feedSet(const MTPDstickerSet &data);
-	StickersSet *feedSetFull(const MTPDmessages_stickerSet &d);
+	not_null<StickersSet*> feedSet(const MTPStickerSet &data);
+	not_null<StickersSet*> feedSet(const MTPStickerSetCovered &data);
+	not_null<StickersSet*> feedSetFull(const MTPDmessages_stickerSet &data);
+	void feedSetStickers(
+		not_null<StickersSet*> set,
+		const QVector<MTPDocument> &documents,
+		const QVector<MTPStickerPack> &packs);
+	void feedSetCovers(
+		not_null<StickersSet*> set,
+		const QVector<MTPDocument> &documents);
 	void newSetReceived(const MTPDmessages_stickerSet &set);
 
-	QString getSetTitle(const MTPDstickerSet &s);
+	[[nodiscard]] QString getSetTitle(const MTPDstickerSet &s);
 
-	RecentStickerPack &getRecentPack() const;
+	[[nodiscard]] RecentStickerPack &getRecentPack() const;
 
 private:
-	bool updateNeeded(crl::time lastUpdate, crl::time now) const {
+	[[nodiscard]] bool updateNeeded(crl::time last, crl::time now) const {
 		constexpr auto kUpdateTimeout = crl::time(3600'000);
-		return (lastUpdate == 0)
-			|| (now >= lastUpdate + kUpdateTimeout);
+		return (last == 0) || (now >= last + kUpdateTimeout);
 	}
-	void checkFavedLimit(StickersSet &set);
+	void checkFavedLimit(
+		StickersSet &set,
+		std::shared_ptr<ChatHelpers::Show> show);
 	void setIsFaved(
+		std::shared_ptr<ChatHelpers::Show> show,
 		not_null<DocumentData*> document,
 		std::optional<std::vector<not_null<EmojiPtr>>> emojiList
 			= std::nullopt);
 	void setIsNotFaved(not_null<DocumentData*> document);
 	void pushFavedToFront(
 		StickersSet &set,
+		std::shared_ptr<ChatHelpers::Show> show,
 		not_null<DocumentData*> document,
 		const std::vector<not_null<EmojiPtr>> &emojiList);
 	void moveFavedToFront(StickersSet &set, int index);
-	void requestSetToPushFaved(not_null<DocumentData*> document);
+	void requestSetToPushFaved(
+		std::shared_ptr<ChatHelpers::Show> show,
+		not_null<DocumentData*> document);
 	void setPackAndEmoji(
 		StickersSet &set,
 		StickersPack &&pack,
 		const std::vector<TimeId> &&dates,
 		const QVector<MTPStickerPack> &packs);
-	void setsOrMasksReceived(
-		const QVector<MTPStickerSet> &data,
+	void somethingReceived(
+		const QVector<MTPStickerSet> &list,
 		uint64 hash,
-		bool masks);
+		StickersType type);
+	void featuredReceived(
+		const MTPDmessages_featuredStickers &data,
+		StickersType type);
 
 	const not_null<Session*> _owner;
-	rpl::event_stream<> _updated;
-	rpl::event_stream<Recent> _recentUpdated;
+	rpl::event_stream<StickersType> _updated;
+	rpl::event_stream<StickersType> _recentUpdated;
 	rpl::event_stream<> _savedGifsUpdated;
 	rpl::event_stream<uint64> _stickerSetInstalled;
+	rpl::event_stream<uint64> _emojiSetInstalled;
 	crl::time _lastUpdate = 0;
 	crl::time _lastRecentUpdate = 0;
 	crl::time _lastFavedUpdate = 0;
 	crl::time _lastFeaturedUpdate = 0;
 	crl::time _lastSavedGifsUpdate = 0;
 	crl::time _lastMasksUpdate = 0;
+	crl::time _lastEmojiUpdate = 0;
+	crl::time _lastFeaturedEmojiUpdate = 0;
 	crl::time _lastRecentAttachedUpdate = 0;
 	rpl::variable<int> _featuredSetsUnreadCount = 0;
 	StickersSets _sets;
 	StickersSetsOrder _setsOrder;
 	StickersSetsOrder _maskSetsOrder;
+	StickersSetsOrder _emojiSetsOrder;
 	StickersSetsOrder _featuredSetsOrder;
+	StickersSetsOrder _featuredEmojiSetsOrder;
 	StickersSetsOrder _archivedSetsOrder;
 	StickersSetsOrder _archivedMaskSetsOrder;
 	SavedGifs _savedGifs;

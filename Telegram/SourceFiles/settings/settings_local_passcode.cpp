@@ -10,21 +10,23 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/platform/base_platform_last_input.h"
 #include "boxes/auto_lock_box.h"
 #include "core/application.h"
+#include "core/core_settings.h"
 #include "lang/lang_keys.h"
 #include "lottie/lottie_icon.h"
 #include "main/main_domain.h"
 #include "main/main_session.h"
 #include "settings/cloud_password/settings_cloud_password_common.h"
-#include "settings/settings_common.h"
 #include "storage/storage_domain.h"
+#include "ui/vertical_list.h"
 #include "ui/boxes/confirm_box.h"
 #include "ui/widgets/buttons.h"
-#include "ui/widgets/input_fields.h"
+#include "ui/widgets/fields/password_input.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/vertical_layout.h"
 #include "window/window_session_controller.h"
 #include "styles/style_boxes.h"
 #include "styles/style_layers.h"
+#include "styles/style_menu_icons.h"
 #include "styles/style_settings.h"
 
 namespace Settings {
@@ -118,7 +120,7 @@ void LocalPasscodeEnter::setupContent() {
 			[=] { _showBack.fire({}); });
 	}
 
-	AddSkip(content);
+	Ui::AddSkip(content);
 
 	content->add(
 		object_ptr<Ui::CenterWrap<>>(
@@ -143,10 +145,10 @@ void LocalPasscodeEnter::setupContent() {
 	};
 
 	addDescription(tr::lng_passcode_about1());
-	AddSkip(content);
+	Ui::AddSkip(content);
 	addDescription(tr::lng_passcode_about2());
 
-	AddSkip(content, st::settingLocalPasscodeDescriptionBottomSkip);
+	Ui::AddSkip(content, st::settingLocalPasscodeDescriptionBottomSkip);
 
 	const auto addField = [&](rpl::producer<QString> &&text) {
 		const auto &st = st::settingLocalPasscodeInputField;
@@ -183,7 +185,9 @@ void LocalPasscodeEnter::setupContent() {
 		return error;
 	};
 
-	const auto newPasscode = addField(tr::lng_passcode_enter_first());
+	const auto newPasscode = addField(isCreate
+		? tr::lng_passcode_enter_first()
+		: tr::lng_passcode_enter());
 
 	const auto reenterPasscode = isCheck
 		? (Ui::PasswordInput*)(nullptr)
@@ -326,7 +330,7 @@ public:
 	}
 
 	[[nodiscard]] static Type Id() {
-		return &SectionMetaImplementation<SectionType>::Meta;
+		return SectionFactory<SectionType>::Instance();
 	}
 	[[nodiscard]] Type id() const final override {
 		return Id();
@@ -379,7 +383,6 @@ public:
 	[[nodiscard]] rpl::producer<QString> title() override;
 
 	void showFinished() override;
-	[[nodiscard]] rpl::producer<Type> sectionShowOther() override;
 	[[nodiscard]] rpl::producer<> sectionShowBack() override;
 
 	[[nodiscard]] rpl::producer<std::vector<Type>> removeFromStack() override;
@@ -395,7 +398,6 @@ private:
 	rpl::variable<bool> _isBottomFillerShown;
 
 	rpl::event_stream<> _showFinished;
-	rpl::event_stream<Type> _showOther;
 	rpl::event_stream<> _showBack;
 
 };
@@ -433,15 +435,15 @@ void LocalPasscodeManage::setupContent() {
 		content->lifetime(),
 		[=] { _showBack.fire({}); });
 
-	AddSkip(content);
+	Ui::AddSkip(content);
 
-	AddButton(
+	AddButtonWithIcon(
 		content,
 		tr::lng_passcode_change(),
 		st::settingsButton,
-		{ &st::settingsIconLock, kIconLightBlue }
+		{ &st::menuIconLock }
 	)->addClickHandler([=] {
-		_showOther.fire(LocalPasscodeChange::Id());
+		showOther(LocalPasscodeChange::Id());
 	});
 
 	auto autolockLabel = state->autoLockBoxClosing.events_starting_with(
@@ -470,14 +472,14 @@ void LocalPasscodeManage::setupContent() {
 			: tr::lng_passcode_autolock_inactive)(),
 		std::move(autolockLabel),
 		st::settingsButton,
-		{ &st::settingsIconTimer, kIconGreen }
+		{ &st::menuIconTimer }
 	)->addClickHandler([=] {
 		const auto box = _controller->show(Box<AutoLockBox>());
 		box->boxClosing(
 		) | rpl::start_to_stream(state->autoLockBoxClosing, box->lifetime());
 	});
 
-	AddSkip(content);
+	Ui::AddSkip(content);
 
 	using Divider = CloudPassword::OneEdgeBoxContentDivider;
 	const auto divider = Ui::CreateChild<Divider>(this);
@@ -494,7 +496,7 @@ void LocalPasscodeManage::setupContent() {
 					return s1 + "\n\n" + s2;
 				}),
 				st::boxDividerLabel),
-		st::settingsDividerLabelPadding));
+		st::defaultBoxDividerLabelPadding));
 	about->geometryValue(
 	) | rpl::start_with_next([=](const QRect &r) {
 		divider->setGeometry(r);
@@ -536,10 +538,6 @@ QPointer<Ui::RpWidget> LocalPasscodeManage::createPinnedToBottom(
 
 void LocalPasscodeManage::showFinished() {
 	_showFinished.fire({});
-}
-
-rpl::producer<Type> LocalPasscodeManage::sectionShowOther() {
-	return _showOther.events();
 }
 
 rpl::producer<> LocalPasscodeManage::sectionShowBack() {

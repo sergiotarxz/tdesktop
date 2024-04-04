@@ -14,15 +14,17 @@ set(scheme_files
     ${res_loc}/tl/mtproto.tl
     ${res_loc}/tl/api.tl
     ${res_loc}/tl/end-to-end.tl
+    ${src_loc}/mtproto/scheme/api.tl
+    ${src_loc}/mtproto/scheme/mtproto.tl
 )
 
 generate_scheme(td_scheme ${src_loc}/codegen/scheme/codegen_scheme.py "${scheme_files}")
 
-nice_target_sources(td_scheme ${res_loc}
+nice_target_sources(td_scheme ${src_loc}/mtproto/scheme
 PRIVATE
-    tl/mtproto.tl
-    tl/api.tl
-	tl/end-to-end.tl
+    tl/end-to-end.tl
+    api.tl
+    mtproto.tl
 )
 
 target_include_directories(td_scheme

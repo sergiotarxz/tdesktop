@@ -7,6 +7,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
+enum class StickerType : uchar;
+
 namespace base {
 template <typename Enum>
 class Flags;
@@ -43,15 +45,15 @@ class PathShiftGradient;
 namespace Data {
 class DocumentMedia;
 class StickersSetThumbnailView;
-enum class StickersSetFlag;
+enum class StickersSetFlag : ushort;
 using StickersSetFlags = base::flags<StickersSetFlag>;
 } // namespace Data
 
 namespace ChatHelpers {
 
-enum class StickerLottieSize : uchar {
+enum class StickerLottieSize : uint8 {
 	MessageHistory,
-	StickerSet,
+	StickerSet, // In Emoji used for forum topic profile cover icons.
 	StickersPanel,
 	StickersFooter,
 	SetsListThumbnail,
@@ -60,7 +62,16 @@ enum class StickerLottieSize : uchar {
 	EmojiInteractionReserved1,
 	EmojiInteractionReserved2,
 	EmojiInteractionReserved3,
+	EmojiInteractionReserved4,
+	EmojiInteractionReserved5,
+	EmojiInteractionReserved6,
+	EmojiInteractionReserved7,
+	ChatIntroHelloSticker,
+	StickerEmojiSize,
 };
+[[nodiscard]] uint8 LottieCacheKeyShift(
+	uint8 replacementsTag,
+	StickerLottieSize sizeTag);
 
 [[nodiscard]] std::unique_ptr<Lottie::SinglePlayer> LottiePlayerFromDocument(
 	not_null<Data::DocumentMedia*> media,
@@ -82,7 +93,7 @@ enum class StickerLottieSize : uchar {
 	QSize box);
 
 [[nodiscard]] bool HasLottieThumbnail(
-	Data::StickersSetFlags flags,
+	StickerType thumbType,
 	Data::StickersSetThumbnailView *thumb,
 	Data::DocumentMedia *media);
 [[nodiscard]] std::unique_ptr<Lottie::SinglePlayer> LottieThumbnail(
@@ -93,7 +104,7 @@ enum class StickerLottieSize : uchar {
 	std::shared_ptr<Lottie::FrameRenderer> renderer = nullptr);
 
 [[nodiscard]] bool HasWebmThumbnail(
-	Data::StickersSetFlags flags,
+	StickerType thumbType,
 	Data::StickersSetThumbnailView *thumb,
 	Data::DocumentMedia *media);
 [[nodiscard]] Media::Clip::ReaderPointer WebmThumbnail(
@@ -105,13 +116,15 @@ bool PaintStickerThumbnailPath(
 	QPainter &p,
 	not_null<Data::DocumentMedia*> media,
 	QRect target,
-	QLinearGradient *gradient = nullptr);
+	QLinearGradient *gradient = nullptr,
+	bool mirrorHorizontal = false);
 
 bool PaintStickerThumbnailPath(
 	QPainter &p,
 	not_null<Data::DocumentMedia*> media,
 	QRect target,
-	not_null<Ui::PathShiftGradient*> gradient);
+	not_null<Ui::PathShiftGradient*> gradient,
+	bool mirrorHorizontal = false);
 
 [[nodiscard]] QSize ComputeStickerSize(
 	not_null<DocumentData*> document,

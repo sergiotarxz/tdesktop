@@ -251,9 +251,9 @@ void Pip::RendererGL::createShadowTexture() {
 	const auto size = 2 * st::callShadow.topLeft.size()
 		+ QSize(st::roundRadiusLarge, st::roundRadiusLarge);
 	auto image = QImage(
-		size * cIntRetinaFactor(),
+		size * style::DevicePixelRatio(),
 		QImage::Format_ARGB32_Premultiplied);
-	image.setDevicePixelRatio(cRetinaFactor());
+	image.setDevicePixelRatio(style::DevicePixelRatio());
 	image.fill(Qt::transparent);
 	{
 		auto p = QPainter(&image);
@@ -269,9 +269,10 @@ void Pip::RendererGL::createShadowTexture() {
 void Pip::RendererGL::paint(
 		not_null<QOpenGLWidget*> widget,
 		QOpenGLFunctions &f) {
-	const auto factor = widget->devicePixelRatio();
+	const auto factor = widget->devicePixelRatioF();
 	if (_factor != factor) {
 		_factor = factor;
+		_ifactor = int(std::ceil(_factor));
 		_controlsImage.invalidate();
 	}
 	_blendingEnabled = false;
@@ -432,7 +433,7 @@ void Pip::RendererGL::paintTransformedContent(
 	_f->glActiveTexture(rgbaFrame ? GL_TEXTURE1 : GL_TEXTURE3);
 	_shadowImage.bind(*_f);
 
-	const auto globalFactor = cIntRetinaFactor();
+	const auto globalFactor = style::DevicePixelRatio();
 	const auto fadeAlpha = st::radialBg->c.alphaF() * geometry.fade;
 	const auto roundRect = transformRect(RoundingRect(geometry));
 	program->setUniformValue("roundRect", Uniform(roundRect));
@@ -497,7 +498,7 @@ void Pip::RendererGL::uploadTexture(
 void Pip::RendererGL::paintRadialLoading(
 		QRect inner,
 		float64 controlsShown) {
-	paintUsingRaster(_radialImage, inner, [&](Painter &&p) {
+	paintUsingRaster(_radialImage, inner, [&](QPainter &&p) {
 		// Raster renderer paints content, then radial loading, then fade.
 		// Here we paint fade together with the content, so we should emulate
 		// radial loading being under the fade.
@@ -521,14 +522,14 @@ void Pip::RendererGL::paintRadialLoading(
 }
 
 void Pip::RendererGL::paintPlayback(QRect outer, float64 shown) {
-	paintUsingRaster(_playbackImage, outer, [&](Painter &&p) {
+	paintUsingRaster(_playbackImage, outer, [&](QPainter &&p) {
 		const auto newOuter = QRect(QPoint(), outer.size());
 		_owner->paintPlaybackContent(p, newOuter, shown);
 	}, kPlaybackOffset, true);
 }
 
 void Pip::RendererGL::paintVolumeController(QRect outer, float64 shown) {
-	paintUsingRaster(_volumeControllerImage, outer, [&](Painter &&p) {
+	paintUsingRaster(_volumeControllerImage, outer, [&](QPainter &&p) {
 		const auto newOuter = QRect(QPoint(), outer.size());
 		_owner->paintVolumeControllerContent(p, newOuter, shown);
 	}, kVolumeControllerOffset, true);
@@ -667,10 +668,10 @@ void Pip::RendererGL::validateControls() {
 		fullHeight += 2 * meta.icon->height();
 	}
 	auto image = QImage(
-		QSize(maxWidth, fullHeight) * _factor,
+		QSize(maxWidth, fullHeight) * _ifactor,
 		QImage::Format_ARGB32_Premultiplied);
 	image.fill(Qt::transparent);
-	image.setDevicePixelRatio(_factor);
+	image.setDevicePixelRatio(_ifactor);
 	{
 		auto p = QPainter(&image);
 		auto index = 0;
@@ -678,8 +679,8 @@ void Pip::RendererGL::validateControls() {
 		const auto paint = [&](not_null<const style::icon*> icon) {
 			icon->paint(p, 0, height, maxWidth);
 			_controlsTextures[index++] = QRect(
-				QPoint(0, height) * _factor,
-				icon->size() * _factor);
+				QPoint(0, height) * _ifactor,
+				icon->size() * _ifactor);
 			height += icon->height();
 		};
 		for (const auto &meta : metas) {
@@ -698,11 +699,11 @@ void Pip::RendererGL::invalidateControls() {
 void Pip::RendererGL::paintUsingRaster(
 		Ui::GL::Image &image,
 		QRect rect,
-		Fn<void(Painter&&)> method,
+		Fn<void(QPainter&&)> method,
 		int bufferOffset,
 		bool transparent) {
 	auto raster = image.takeImage();
-	const auto size = rect.size() * _factor;
+	const auto size = rect.size() * _ifactor;
 	if (raster.width() < size.width() || raster.height() < size.height()) {
 		raster = QImage(size, QImage::Format_ARGB32_Premultiplied);
 		raster.setDevicePixelRatio(_factor);
@@ -711,14 +712,14 @@ void Pip::RendererGL::paintUsingRaster(
 				|| raster.height() > size.height())) {
 			raster.fill(Qt::transparent);
 		}
-	} else if (raster.devicePixelRatio() != _factor) {
-		raster.setDevicePixelRatio(_factor);
+	} else if (raster.devicePixelRatio() != _ifactor) {
+		raster.setDevicePixelRatio(_ifactor);
 	}
 
 	if (transparent) {
 		raster.fill(Qt::transparent);
 	}
-	method(Painter(&raster));
+	method(QPainter(&raster));
 
 	_f->glActiveTexture(GL_TEXTURE0);
 

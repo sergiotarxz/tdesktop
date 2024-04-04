@@ -37,8 +37,8 @@ struct UploadedMedia {
 
 struct UploadSecureProgress {
 	FullMsgId fullId;
-	int offset = 0;
-	int size = 0;
+	int64 offset = 0;
+	int64 size = 0;
 };
 
 struct UploadSecureDone {
@@ -98,6 +98,10 @@ public:
 		return _secureFailed.events();
 	}
 
+	[[nodiscard]] rpl::producer<FullMsgId> nonPremiumDelays() const {
+		return _nonPremiumDelays.events();
+	}
+
 	void unpause();
 	void sendNext();
 	void stopSessions();
@@ -126,7 +130,8 @@ private:
 	base::flat_map<mtpRequestId, QByteArray> requestsSent;
 	base::flat_map<mtpRequestId, int32> docRequestsSent;
 	base::flat_map<mtpRequestId, int32> dcMap;
-	uint32 sentSize = 0;
+	base::flat_set<mtpRequestId> _nonPremiumDelayed;
+	uint32 sentSize = 0; // FileSize: Right now any file size fits 32 bit.
 	uint32 sentSizes[MTP::kUploadSessionsCount] = { 0 };
 
 	FullMsgId uploadingId;
@@ -143,6 +148,7 @@ private:
 	rpl::event_stream<FullMsgId> _photoFailed;
 	rpl::event_stream<FullMsgId> _documentFailed;
 	rpl::event_stream<FullMsgId> _secureFailed;
+	rpl::event_stream<FullMsgId> _nonPremiumDelays;
 
 	rpl::lifetime _lifetime;
 

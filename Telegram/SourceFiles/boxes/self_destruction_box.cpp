@@ -24,7 +24,7 @@ using Type = SelfDestructionBox::Type;
 [[nodiscard]] std::vector<int> Values(Type type) {
 	switch (type) {
 	case Type::Account: return { 30, 90, 180, 365 };
-	case Type::Sessions: return { 7, 30, 90, 180 };
+	case Type::Sessions: return { 7, 30, 90, 180, 365 };
 	}
 	Unexpected("SelfDestructionBox::Type in Values.");
 }
@@ -95,12 +95,13 @@ void SelfDestructionBox::showContent() {
 
 	clearButtons();
 	addButton(tr::lng_settings_save(), [=] {
+		const auto value = _ttlGroup->current();
 		switch (_type) {
 		case Type::Account:
-			_session->api().selfDestruct().update(_ttlGroup->value());
+			_session->api().selfDestruct().updateAccountTTL(value);
 			break;
 		case Type::Sessions:
-			_session->api().authorizations().updateTTL(_ttlGroup->value());
+			_session->api().authorizations().updateTTL(value);
 			break;
 		}
 

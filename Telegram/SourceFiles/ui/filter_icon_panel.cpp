@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/panel_animation.h"
 #include "ui/ui_utility.h"
 #include "ui/filter_icons.h"
+#include "ui/painter.h"
 #include "ui/cached_round_corners.h"
 #include "lang/lang_keys.h"
 #include "core/application.h"
@@ -69,7 +70,8 @@ constexpr auto kIcons = std::array{
 
 FilterIconPanel::FilterIconPanel(QWidget *parent)
 : RpWidget(parent)
-, _inner(Ui::CreateChild<Ui::RpWidget>(this)) {
+, _inner(Ui::CreateChild<Ui::RpWidget>(this))
+, _innerBg(ImageRoundRadius::Small, st::dialogsBg) {
 	setup();
 }
 
@@ -116,11 +118,7 @@ void FilterIconPanel::setupInner() {
 	_inner->paintRequest(
 		) | rpl::start_with_next([=](QRect clip) {
 		auto p = Painter(_inner);
-		Ui::FillRoundRect(
-			p,
-			_inner->rect(),
-			st::dialogsBg,
-			ImageRoundRadius::Small);
+		_innerBg.paint(p, _inner->rect());
 		p.setFont(st::emojiPanHeaderFont);
 		p.setPen(st::emojiPanHeaderFg);
 		p.drawTextLeft(
@@ -379,7 +377,11 @@ void FilterIconPanel::startShowAnimation() {
 
 		_showAnimation = std::make_unique<Ui::PanelAnimation>(st::emojiPanAnimation, Ui::PanelAnimation::Origin::TopRight);
 		auto inner = rect().marginsRemoved(st::emojiPanMargins);
-		_showAnimation->setFinalImage(std::move(image), QRect(inner.topLeft() * cIntRetinaFactor(), inner.size() * cIntRetinaFactor()));
+		_showAnimation->setFinalImage(
+			std::move(image),
+			QRect(
+				inner.topLeft() * style::DevicePixelRatio(),
+				inner.size() * style::DevicePixelRatio()));
 		_showAnimation->setCornerMasks(Images::CornersMask(ImageRoundRadius::Small));
 		_showAnimation->start();
 	}
@@ -397,9 +399,9 @@ QImage FilterIconPanel::grabForAnimation() {
 	Ui::SendPendingMoveResizeEvents(this);
 
 	auto result = QImage(
-		size() * cIntRetinaFactor(),
+		size() * style::DevicePixelRatio(),
 		QImage::Format_ARGB32_Premultiplied);
-	result.setDevicePixelRatio(cRetinaFactor());
+	result.setDevicePixelRatio(style::DevicePixelRatio());
 	result.fill(Qt::transparent);
 	if (_inner) {
 		QPainter p(&result);

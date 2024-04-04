@@ -16,7 +16,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_file_origin.h"
 #include "data/data_session.h"
 #include "data/notify/data_notify_settings.h"
-#include "main/main_account.h"
 #include "main/main_app_config.h"
 #include "main/main_session.h"
 #include "storage/file_upload.h"
@@ -41,7 +40,7 @@ SendMediaReady PrepareRingtoneDocument(
 		MTP_bytes(),
 		MTP_int(base::unixtime::now()),
 		MTP_string(filemime),
-		MTP_int(content.size()),
+		MTP_long(content.size()),
 		MTP_vector<MTPPhotoSize>(),
 		MTPVector<MTPVideoSize>(),
 		MTP_int(dcId),
@@ -60,8 +59,7 @@ SendMediaReady PrepareRingtoneDocument(
 		MTP_photoEmpty(MTP_long(0)),
 		PreparedPhotoThumbs(),
 		document,
-		QByteArray(),
-		0);
+		QByteArray());
 }
 
 } // namespace
@@ -191,22 +189,22 @@ void Ringtones::remove(DocumentId id) {
 	}
 }
 
-int Ringtones::maxSize() const {
-	return int(base::SafeRound(_session->account().appConfig().get<double>(
-		"ringtone_size_max",
-		100 * 1024)));
+int64 Ringtones::maxSize() const {
+	return _session->appConfig().get<int>(
+		u"ringtone_size_max"_q,
+		100 * 1024);
 }
 
 int Ringtones::maxSavedCount() const {
-	return int(base::SafeRound(_session->account().appConfig().get<double>(
-		"ringtone_saved_count_max",
-		100)));
+	return _session->appConfig().get<int>(
+		u"ringtone_saved_count_max"_q,
+		100);
 }
 
-int Ringtones::maxDuration() const {
-	return int(base::SafeRound(_session->account().appConfig().get<double>(
-		"ringtone_duration_max",
-		5)));
+crl::time Ringtones::maxDuration() const {
+	return crl::time(1000) * _session->appConfig().get<int>(
+		u"ringtone_duration_max"_q,
+		5);
 }
 
 } // namespace Api

@@ -10,6 +10,11 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/algorithm.h"
 #include "logs.h"
 
+#if !defined TDESKTOP_USE_PACKAGED && !defined Q_OS_WIN && !defined Q_OS_MAC
+#include "base/platform/linux/base_linux_library.h"
+#include <deque>
+#endif // !TDESKTOP_USE_PACKAGED && !Q_OS_WIN && !Q_OS_MAC
+
 #include <QImage>
 
 #ifdef LIB_FFMPEG_USE_QT_PRIVATE_API
@@ -85,6 +90,34 @@ void PremultiplyLine(uchar *dst, const uchar *src, int intsCount) {
 #endif // LIB_FFMPEG_USE_QT_PRIVATE_API
 }
 
+#if !defined TDESKTOP_USE_PACKAGED && !defined Q_OS_WIN && !defined Q_OS_MAC
+[[nodiscard]] auto CheckHwLibs() {
+	auto list = std::deque{
+		AV_PIX_FMT_CUDA,
+	};
+	if (base::Platform::LoadLibrary("libvdpau.so.1")) {
+		list.push_front(AV_PIX_FMT_VDPAU);
+	}
+	if ([&] {
+		const auto list = std::array{
+			"libva-drm.so.2",
+			"libva-x11.so.2",
+			"libva.so.2",
+			"libdrm.so.2",
+		};
+		for (const auto lib : list) {
+			if (!base::Platform::LoadLibrary(lib)) {
+				return false;
+			}
+		}
+		return true;
+	}()) {
+		list.push_front(AV_PIX_FMT_VAAPI);
+	}
+	return list;
+}
+#endif // !TDESKTOP_USE_PACKAGED && !Q_OS_WIN && !Q_OS_MAC
+
 [[nodiscard]] bool InitHw(AVCodecContext *context, AVHWDeviceType type) {
 	AVCodecContext *parent = static_cast<AVCodecContext*>(context->opaque);
 
@@ -96,13 +129,14 @@ void PremultiplyLine(uchar *dst, const uchar *src, int intsCount) {
 		nullptr,
 		0);
 	if (error || !hwDeviceContext) {
-		LogError(qstr("av_hwdevice_ctx_create"), error);
+		LogError(u"av_hwdevice_ctx_create"_q, error);
 		return false;
 	}
 	DEBUG_LOG(("Video Info: "
 		"Trying \"%1\" hardware acceleration for \"%2\" decoder."
-		).arg(av_hwdevice_get_type_name(type)
-		).arg(context->codec->name));
+		).arg(
+			av_hwdevice_get_type_name(type),
+			context->codec->name));
 	if (parent->hw_device_ctx) {
 		av_buffer_unref(&parent->hw_device_ctx);
 	}
@@ -125,6 +159,9 @@ void PremultiplyLine(uchar *dst, const uchar *src, int intsCount) {
 		}
 		return false;
 	};
+#if !defined TDESKTOP_USE_PACKAGED && !defined Q_OS_WIN && !defined Q_OS_MAC
+	static const auto list = CheckHwLibs();
+#else // !TDESKTOP_USE_PACKAGED && !Q_OS_WIN && !Q_OS_MAC
 	const auto list = std::array{
 #ifdef Q_OS_WIN
 		AV_PIX_FMT_D3D11,
@@ -138,6 +175,7 @@ void PremultiplyLine(uchar *dst, const uchar *src, int intsCount) {
 		AV_PIX_FMT_CUDA,
 #endif // Q_OS_WIN || Q_OS_MAC
 	};
+#endif // TDESKTOP_USE_PACKAGED || Q_OS_WIN || Q_OS_MAC
 	for (const auto format : list) {
 		if (!has(format)) {
 			continue;
@@ -195,7 +233,7 @@ IOPointer MakeIOPointer(
 		int64_t(*seek)(void *opaque, int64_t offset, int whence)) {
 	auto buffer = reinterpret_cast<uchar*>(av_malloc(kAvioBlockSize));
 	if (!buffer) {
-		LogError(qstr("av_malloc"));
+		LogError(u"av_malloc"_q);
 		return {};
 	}
 	auto result = IOPointer(avio_alloc_context(
@@ -208,7 +246,7 @@ IOPointer MakeIOPointer(
 		seek));
 	if (!result) {
 		av_freep(&buffer);
-		LogError(qstr("avio_alloc_context"));
+		LogError(u"avio_alloc_context"_q);
 		return {};
 	}
 	return result;
@@ -230,9 +268,10 @@ FormatPointer MakeFormatPointer(
 	if (!io) {
 		return {};
 	}
+	io->seekable = (seek != nullptr);
 	auto result = avformat_alloc_context();
 	if (!result) {
-		LogError(qstr("avformat_alloc_context"));
+		LogError(u"avformat_alloc_context"_q);
 		return {};
 	}
 	result->pb = io.get();
@@ -247,10 +286,12 @@ FormatPointer MakeFormatPointer(
 		&options));
 	if (error) {
 		// avformat_open_input freed 'result' in case an error happened.
-		LogError(qstr("avformat_open_input"), error);
+		LogError(u"avformat_open_input"_q, error);
 		return {};
 	}
-	result->flags |= AVFMT_FLAG_FAST_SEEK;
+	if (seek) {
+		result->flags |= AVFMT_FLAG_FAST_SEEK;
+	}
 
 	// Now FormatPointer will own and free the IO context.
 	io.release();
@@ -277,13 +318,13 @@ CodecPointer MakeCodecPointer(CodecDescriptor descriptor) {
 	auto result = CodecPointer(avcodec_alloc_context3(nullptr));
 	const auto context = result.get();
 	if (!context) {
-		LogError(qstr("avcodec_alloc_context3"));
+		LogError(u"avcodec_alloc_context3"_q);
 		return {};
 	}
 	const auto stream = descriptor.stream;
 	error = avcodec_parameters_to_context(context, stream->codecpar);
 	if (error) {
-		LogError(qstr("avcodec_parameters_to_context"), error);
+		LogError(u"avcodec_parameters_to_context"_q, error);
 		return {};
 	}
 	context->pkt_timebase = stream->time_base;
@@ -292,7 +333,7 @@ CodecPointer MakeCodecPointer(CodecDescriptor descriptor) {
 
 	const auto codec = FindDecoder(context);
 	if (!codec) {
-		LogError(qstr("avcodec_find_decoder"), context->codec_id);
+		LogError(u"avcodec_find_decoder"_q, context->codec_id);
 		return {};
 	}
 
@@ -305,7 +346,7 @@ CodecPointer MakeCodecPointer(CodecDescriptor descriptor) {
 	}
 
 	if ((error = avcodec_open2(context, codec, nullptr))) {
-		LogError(qstr("avcodec_open2"), error);
+		LogError(u"avcodec_open2"_q, error);
 		return {};
 	}
 	return result;
@@ -319,6 +360,12 @@ void CodecDeleter::operator()(AVCodecContext *value) {
 
 FramePointer MakeFramePointer() {
 	return FramePointer(av_frame_alloc());
+}
+
+FramePointer DuplicateFramePointer(AVFrame *frame) {
+	return frame
+		? FramePointer(av_frame_clone(frame))
+		: FramePointer();
 }
 
 bool FrameHasData(AVFrame *frame) {
@@ -356,7 +403,7 @@ SwscalePointer MakeSwscalePointer(
 		}
 	}
 	if (srcFormat <= AV_PIX_FMT_NONE || srcFormat >= AV_PIX_FMT_NB) {
-		LogError(qstr("frame->format"));
+		LogError(u"frame->format"_q);
 		return SwscalePointer();
 	}
 
@@ -373,7 +420,7 @@ SwscalePointer MakeSwscalePointer(
 		nullptr,
 		nullptr);
 	if (!result) {
-		LogError(qstr("sws_getCachedContext"));
+		LogError(u"sws_getCachedContext"_q);
 	}
 	return SwscalePointer(
 		result,
@@ -398,11 +445,11 @@ void SwscaleDeleter::operator()(SwsContext *value) {
 	}
 }
 
-void LogError(QLatin1String method) {
+void LogError(const QString &method) {
 	LOG(("Streaming Error: Error in %1.").arg(method));
 }
 
-void LogError(QLatin1String method, AvErrorWrap error) {
+void LogError(const QString &method, AvErrorWrap error) {
 	LOG(("Streaming Error: Error in %1 (code: %2, text: %3)."
 		).arg(method
 		).arg(error.code()
@@ -475,11 +522,15 @@ AVRational ValidateAspectRatio(AVRational aspect) {
 QSize CorrectByAspect(QSize size, AVRational aspect) {
 	Expects(IsValidAspectRatio(aspect));
 
-	return QSize(size.width() * aspect.num / aspect.den, size.height());
+	return QSize(size.width() * av_q2d(aspect), size.height());
 }
 
 bool RotationSwapWidthHeight(int rotation) {
 	return (rotation == 90 || rotation == 270);
+}
+
+QSize TransposeSizeByRotation(QSize size, int rotation) {
+	return RotationSwapWidthHeight(rotation) ? size.transposed() : size;
 }
 
 bool GoodStorageForFrame(const QImage &storage, QSize size) {
@@ -515,26 +566,26 @@ QImage CreateFrameStorage(QSize size) {
 		cleanupData);
 }
 
-void UnPremultiply(QImage &to, const QImage &from) {
+void UnPremultiply(QImage &dst, const QImage &src) {
 	// This creates QImage::Format_ARGB32_Premultiplied, but we use it
 	// as an image in QImage::Format_ARGB32 format.
-	if (!GoodStorageForFrame(to, from.size())) {
-		to = CreateFrameStorage(from.size());
+	if (!GoodStorageForFrame(dst, src.size())) {
+		dst = CreateFrameStorage(src.size());
 	}
-	const auto fromPerLine = from.bytesPerLine();
-	const auto toPerLine = to.bytesPerLine();
-	const auto width = from.width();
-	const auto height = from.height();
-	auto fromBytes = from.bits();
-	auto toBytes = to.bits();
-	if (fromPerLine != width * 4 || toPerLine != width * 4) {
+	const auto srcPerLine = src.bytesPerLine();
+	const auto dstPerLine = dst.bytesPerLine();
+	const auto width = src.width();
+	const auto height = src.height();
+	auto srcBytes = src.bits();
+	auto dstBytes = dst.bits();
+	if (srcPerLine != width * 4 || dstPerLine != width * 4) {
 		for (auto i = 0; i != height; ++i) {
-			UnPremultiplyLine(toBytes, fromBytes, width);
-			fromBytes += fromPerLine;
-			toBytes += toPerLine;
+			UnPremultiplyLine(dstBytes, srcBytes, width);
+			srcBytes += srcPerLine;
+			dstBytes += dstPerLine;
 		}
 	} else {
-		UnPremultiplyLine(toBytes, fromBytes, width * height);
+		UnPremultiplyLine(dstBytes, srcBytes, width * height);
 	}
 }
 

@@ -8,150 +8,120 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "platform/linux/linux_xdp_open_with_dialog.h"
 
 #include "base/platform/base_platform_info.h"
-#include "base/platform/linux/base_linux_glibmm_helper.h"
 #include "base/platform/linux/base_linux_xdp_utilities.h"
-#include "core/application.h"
-#include "window/window_controller.h"
+#include "base/platform/linux/base_linux_xdg_activation_token.h"
 #include "base/random.h"
 
 #include <fcntl.h>
-#include <glibmm.h>
-#include <giomm.h>
+#include <xdpopenuri/xdpopenuri.hpp>
+#include <xdprequest/xdprequest.hpp>
 
 namespace Platform {
 namespace File {
 namespace internal {
 namespace {
 
-constexpr auto kXDPOpenURIInterface = "org.freedesktop.portal.OpenURI"_cs;
-constexpr auto kPropertiesInterface = "org.freedesktop.DBus.Properties"_cs;
+using namespace gi::repository;
+using base::Platform::XdgActivationToken;
 
 } // namespace
 
 bool ShowXDPOpenWithDialog(const QString &filepath) {
-	try {
-		const auto connection = Gio::DBus::Connection::get_sync(
-			Gio::DBus::BusType::BUS_TYPE_SESSION);
+	auto proxy = XdpOpenURI::OpenURIProxy::new_for_bus_sync(
+		Gio::BusType::SESSION_,
+		Gio::DBusProxyFlags::NONE_,
+		base::Platform::XDP::kService,
+		base::Platform::XDP::kObjectPath,
+		nullptr);
 
-		auto reply = connection->call_sync(
-			std::string(base::Platform::XDP::kObjectPath),
-			std::string(kPropertiesInterface),
-			"Get",
-			base::Platform::MakeGlibVariant(std::tuple{
-				Glib::ustring(
-					std::string(kXDPOpenURIInterface)),
-				Glib::ustring("version"),
-			}),
-			std::string(base::Platform::XDP::kService));
-
-		const auto version = base::Platform::GlibVariantCast<uint>(
-			base::Platform::GlibVariantCast<Glib::VariantBase>(
-				reply.get_child(0)));
-
-		if (version < 3) {
-			return false;
-		}
-
-		const auto filepathUtf8 = filepath.toUtf8();
-
-		const auto fd = open(
-			filepathUtf8.constData(),
-			O_RDONLY);
-
-		if (fd == -1) {
-			return false;
-		}
-
-		const auto fdGuard = gsl::finally([&] { ::close(fd); });
-
-		const auto parentWindowId = [&]() -> Glib::ustring {
-			const auto activeWindow = Core::App().activeWindow();
-			if (!activeWindow) {
-				return {};
-			}
-
-			return base::Platform::XDP::ParentWindowID(
-				activeWindow->widget()->windowHandle());
-		}();
-
-		const auto handleToken = Glib::ustring("tdesktop")
-			+ std::to_string(base::RandomValue<uint>());
-
-		auto uniqueName = connection->get_unique_name();
-		uniqueName.erase(0, 1);
-		uniqueName.replace(uniqueName.find('.'), 1, 1, '_');
-
-		const auto requestPath = Glib::ustring(
-				"/org/freedesktop/portal/desktop/request/")
-			+ uniqueName
-			+ '/'
-			+ handleToken;
-
-		const auto loop = Glib::MainLoop::create();
-
-		const auto signalId = connection->signal_subscribe(
-			[&](
-				const Glib::RefPtr<Gio::DBus::Connection> &connection,
-				const Glib::ustring &sender_name,
-				const Glib::ustring &object_path,
-				const Glib::ustring &interface_name,
-				const Glib::ustring &signal_name,
-				const Glib::VariantContainerBase &parameters) {
-				loop->quit();
-			},
-			std::string(base::Platform::XDP::kService),
-			"org.freedesktop.portal.Request",
-			"Response",
-			requestPath);
-
-		const auto signalGuard = gsl::finally([&] {
-			if (signalId != 0) {
-				connection->signal_unsubscribe(signalId);
-			}
-		});
-
-		const auto fdList = Gio::UnixFDList::create();
-		fdList->append(fd);
-		auto outFdList = Glib::RefPtr<Gio::UnixFDList>();
-
-		connection->call_sync(
-			std::string(base::Platform::XDP::kObjectPath),
-			std::string(kXDPOpenURIInterface),
-			"OpenFile",
-			Glib::VariantContainerBase::create_tuple({
-				Glib::Variant<Glib::ustring>::create(parentWindowId),
-				Glib::wrap(g_variant_new_handle(0)),
-				Glib::Variant<std::map<
-					Glib::ustring,
-					Glib::VariantBase
-				>>::create({
-					{
-						"handle_token",
-						Glib::Variant<Glib::ustring>::create(handleToken)
-					},
-					{
-						"ask",
-						Glib::Variant<bool>::create(true)
-					},
-				}),
-			}),
-			fdList,
-			outFdList,
-			std::string(base::Platform::XDP::kService));
-
-		if (signalId != 0) {
-			QWidget window;
-			window.setAttribute(Qt::WA_DontShowOnScreen);
-			window.setWindowModality(Qt::ApplicationModal);
-			window.show();
-			loop->run();
-		}
-
-		return true;
-	} catch (...) {
+	if (!proxy) {
+		return false;
 	}
 
-	return false;
+	auto interface = XdpOpenURI::OpenURI(proxy);
+	if (interface.get_version() < 3) {
+		return false;
+	}
+
+	const auto fd = open(
+		QFile::encodeName(filepath).constData(),
+		O_RDONLY);
+
+	if (fd == -1) {
+		return false;
+	}
+
+	const auto fdGuard = gsl::finally([&] { close(fd); });
+
+	const auto handleToken = "tdesktop"
+		+ std::to_string(base::RandomValue<uint>());
+
+	std::string uniqueName = proxy.get_connection().get_unique_name();
+	uniqueName.erase(0, 1);
+	uniqueName.replace(uniqueName.find('.'), 1, 1, '_');
+
+	auto request = XdpRequest::Request(
+		XdpRequest::RequestProxy::new_sync(
+			proxy.get_connection(),
+			Gio::DBusProxyFlags::NONE_,
+			base::Platform::XDP::kService,
+			base::Platform::XDP::kObjectPath
+				+ std::string("/request/")
+				+ uniqueName
+				+ '/'
+				+ handleToken,
+			nullptr,
+			nullptr));
+
+	if (!request) {
+		return false;
+	}
+
+	auto loop = GLib::MainLoop::new_();
+
+	const auto signalId = request.signal_response().connect([=](
+			XdpRequest::Request,
+			guint,
+			GLib::Variant) mutable {
+		loop.quit();
+	});
+
+	const auto signalGuard = gsl::finally([&] {
+		request.disconnect(signalId);
+	});
+
+	auto result = interface.call_open_file_sync(
+		base::Platform::XDP::ParentWindowID(),
+		GLib::Variant::new_handle(0),
+		GLib::Variant::new_array({
+			GLib::Variant::new_dict_entry(
+				GLib::Variant::new_string("handle_token"),
+				GLib::Variant::new_variant(
+					GLib::Variant::new_string(handleToken))),
+			GLib::Variant::new_dict_entry(
+				GLib::Variant::new_string("activation_token"),
+				GLib::Variant::new_variant(
+					GLib::Variant::new_string(
+						XdgActivationToken().toStdString()))),
+			GLib::Variant::new_dict_entry(
+				GLib::Variant::new_string("ask"),
+				GLib::Variant::new_variant(
+					GLib::Variant::new_boolean(true))),
+		}),
+		Gio::UnixFDList::new_from_array((std::array{ fd }).data(), 1),
+		nullptr);
+
+	if (!result) {
+		return false;
+	}
+
+	QWidget window;
+	window.setAttribute(Qt::WA_DontShowOnScreen);
+	window.setWindowModality(Qt::ApplicationModal);
+	window.show();
+	loop.run();
+
+	return true;
 }
 
 } // namespace internal

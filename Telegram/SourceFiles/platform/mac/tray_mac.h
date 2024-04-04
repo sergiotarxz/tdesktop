@@ -27,6 +27,8 @@ public:
 	[[nodiscard]] rpl::producer<> hideToTrayRequests() const;
 	[[nodiscard]] rpl::producer<> iconClicks() const;
 
+	[[nodiscard]] bool hasIcon() const;
+
 	void createIcon();
 	void destroyIcon();
 
@@ -52,5 +54,9 @@ private:
 	rpl::lifetime _lifetime;
 
 };
+
+inline bool HasMonochromeSetting() {
+	return false;
+}
 
 } // namespace Platform

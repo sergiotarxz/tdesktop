@@ -11,6 +11,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_pts_waiter.h"
 #include "data/data_location.h"
 #include "data/data_chat_participant_status.h"
+#include "data/data_peer_bot_commands.h"
+#include "data/data_user_names.h"
 
 struct ChannelLocation {
 	QString address;
@@ -30,34 +32,49 @@ struct ChannelLocation {
 	}
 };
 
-enum class ChannelDataFlag {
-	Left = (1 << 0),
-	Creator = (1 << 1),
-	Forbidden = (1 << 2),
-	CallActive = (1 << 3),
-	CallNotEmpty = (1 << 4),
-	Signatures = (1 << 5),
-	Verified = (1 << 6),
-	Scam = (1 << 7),
-	Fake = (1 << 8),
-	Megagroup = (1 << 9),
-	Broadcast = (1 << 10),
-	Gigagroup = (1 << 11),
-	Username = (1 << 12),
-	Location = (1 << 13),
-	CanSetUsername = (1 << 14),
-	CanSetStickers = (1 << 15),
-	PreHistoryHidden = (1 << 16),
-	CanViewParticipants = (1 << 17),
-	HasLink = (1 << 18),
-	SlowmodeEnabled = (1 << 19),
-	NoForwards = (1 << 20),
+enum class ChannelDataFlag : uint64 {
+	Left = (1ULL << 0),
+	Creator = (1ULL << 1),
+	Forbidden = (1ULL << 2),
+	CallActive = (1ULL << 3),
+	CallNotEmpty = (1ULL << 4),
+	Signatures = (1ULL << 5),
+	Verified = (1ULL << 6),
+	Scam = (1ULL << 7),
+	Fake = (1ULL << 8),
+	Megagroup = (1ULL << 9),
+	Broadcast = (1ULL << 10),
+	Gigagroup = (1ULL << 11),
+	Username = (1ULL << 12),
+	Location = (1ULL << 13),
+	CanSetUsername = (1ULL << 14),
+	CanSetStickers = (1ULL << 15),
+	PreHistoryHidden = (1ULL << 16),
+	CanViewParticipants = (1ULL << 17),
+	HasLink = (1ULL << 18),
+	SlowmodeEnabled = (1ULL << 19),
+	NoForwards = (1ULL << 20),
+	JoinToWrite = (1ULL << 21),
+	RequestToJoin = (1ULL << 22),
+	Forum = (1ULL << 23),
+	AntiSpam = (1ULL << 24),
+	ParticipantsHidden = (1ULL << 25),
+	StoriesHidden = (1ULL << 26),
+	HasActiveStories = (1ULL << 27),
+	HasUnreadStories = (1ULL << 28),
+	CanGetStatistics = (1ULL << 29),
+	ViewAsMessages = (1ULL << 30),
+	SimilarExpanded = (1ULL << 31),
+	CanViewRevenue = (1ULL << 32),
 };
 inline constexpr bool is_flag_type(ChannelDataFlag) { return true; };
 using ChannelDataFlags = base::flags<ChannelDataFlag>;
 
 class MegagroupInfo {
 public:
+	MegagroupInfo();
+	~MegagroupInfo();
+
 	struct Admin {
 		explicit Admin(ChatAdminRightsInfo rights)
 		: rights(rights) {
@@ -83,20 +100,22 @@ public:
 	const ChannelLocation *getLocation() const;
 	void setLocation(const ChannelLocation &location);
 
-	bool updateBotCommands(const MTPVector<MTPBotInfo> &data);
-	bool updateBotCommands(
-		UserId botId,
-		const MTPVector<MTPBotCommand> &data);
-	[[nodiscard]] auto botCommands() const
-		-> const base::flat_map<UserId, std::vector<BotCommand>> & {
+	Data::ChatBotCommands::Changed setBotCommands(
+		const std::vector<Data::BotCommands> &commands);
+	[[nodiscard]] const Data::ChatBotCommands &botCommands() const {
 		return _botCommands;
 	}
+
+	void ensureForum(not_null<ChannelData*> that);
+	[[nodiscard]] Data::Forum *forum() const;
+	[[nodiscard]] std::unique_ptr<Data::Forum> takeForumData();
 
 	std::deque<not_null<UserData*>> lastParticipants;
 	base::flat_map<not_null<UserData*>, Admin> lastAdmins;
 	base::flat_map<not_null<UserData*>, Restricted> lastRestricted;
 	base::flat_set<not_null<PeerData*>> markupSenders;
 	base::flat_set<not_null<UserData*>> bots;
+	rpl::event_stream<bool> unrestrictedByBoostsChanges;
 
 	// For admin badges, full admins list with ranks.
 	base::flat_map<UserId, QString> admins;
@@ -105,7 +124,9 @@ public:
 	QString creatorRank;
 	int botStatus = 0; // -1 - no bots, 0 - unknown, 1 - one bot, that sees all history, 2 - other
 	bool joinedMessageFound = false;
+	bool adminsLoaded = false;
 	StickerSetIdentifier stickerSet;
+	StickerSetIdentifier emojiSet;
 
 	enum LastParticipantsStatus {
 		LastParticipantsUpToDate       = 0x00,
@@ -114,15 +135,21 @@ public:
 	};
 	mutable int lastParticipantsStatus = LastParticipantsUpToDate;
 	int lastParticipantsCount = 0;
+	int boostsApplied = 0;
+	int boostsUnrestrict = 0;
+
+	int slowmodeSeconds = 0;
+	TimeId slowmodeLastMessage = 0;
 
 private:
 	ChatData *_migratedFrom = nullptr;
 	ChannelLocation _location;
-	base::flat_map<UserId, std::vector<BotCommand>> _botCommands;
+	Data::ChatBotCommands _botCommands;
+	std::unique_ptr<Data::Forum> _forum;
 
 };
 
-class ChannelData : public PeerData {
+class ChannelData final : public PeerData {
 public:
 	using Flag = ChannelDataFlag;
 	using Flags = Data::Flags<ChannelDataFlags>;
@@ -137,24 +164,25 @@ public:
 	ChannelData(not_null<Data::Session*> owner, PeerId id);
 
 	void setName(const QString &name, const QString &username);
+	void setUsername(const QString &username);
+	void setUsernames(const Data::Usernames &newUsernames);
 	void setPhoto(const MTPChatPhoto &photo);
 	void setAccessHash(uint64 accessHash);
 
-	void setFlags(ChannelDataFlags which) {
-		_flags.set(which);
-	}
-	void addFlags(ChannelDataFlags which) {
-		_flags.add(which);
-	}
-	void removeFlags(ChannelDataFlags which) {
-		_flags.remove(which);
-	}
+	void setFlags(ChannelDataFlags which);
+	void addFlags(ChannelDataFlags which);
+	void removeFlags(ChannelDataFlags which);
 	[[nodiscard]] auto flags() const {
 		return _flags.current();
 	}
 	[[nodiscard]] auto flagsValue() const {
 		return _flags.value();
 	}
+
+	[[nodiscard]] QString username() const;
+	[[nodiscard]] QString editableUsername() const;
+	[[nodiscard]] const std::vector<QString> &usernames() const;
+	[[nodiscard]] bool isUsernameEditable(QString username) const;
 
 	[[nodiscard]] int membersCount() const {
 		return std::max(_membersCount, 1);
@@ -213,6 +241,12 @@ public:
 	[[nodiscard]] bool isFake() const {
 		return flags() & Flag::Fake;
 	}
+	[[nodiscard]] bool hasStoriesHidden() const {
+		return flags() & Flag::StoriesHidden;
+	}
+	[[nodiscard]] bool viewForumAsMessages() const {
+		return flags() & Flag::ViewAsMessages;
+	}
 
 	[[nodiscard]] static ChatRestrictionsInfo KickedRestrictedRights(
 		not_null<PeerData*> participant);
@@ -229,6 +263,7 @@ public:
 		not_null<PeerData*> participant,
 		ChatRestrictionsInfo oldRights,
 		ChatRestrictionsInfo newRights);
+	void setViewAsMessagesFlag(bool enabled);
 
 	void markForbidden();
 
@@ -243,6 +278,9 @@ public:
 	[[nodiscard]] bool isGigagroup() const {
 		return flags() & Flag::Gigagroup;
 	}
+	[[nodiscard]] bool isForum() const {
+		return flags() & Flag::Forum;
+	}
 	[[nodiscard]] bool hasUsername() const {
 		return flags() & Flag::Username;
 	}
@@ -254,6 +292,15 @@ public:
 	}
 	[[nodiscard]] bool amCreator() const {
 		return flags() & Flag::Creator;
+	}
+	[[nodiscard]] bool joinToWrite() const {
+		return flags() & Flag::JoinToWrite;
+	}
+	[[nodiscard]] bool requestToJoin() const {
+		return flags() & Flag::RequestToJoin;
+	}
+	[[nodiscard]] bool antiSpamMode() const {
+		return flags() & Flag::AntiSpam;
 	}
 
 	[[nodiscard]] auto adminRights() const {
@@ -294,7 +341,6 @@ public:
 	void setDefaultRestrictions(ChatRestrictions rights);
 
 	// Like in ChatData.
-	[[nodiscard]] bool canWrite() const;
 	[[nodiscard]] bool allowsForwarding() const;
 	[[nodiscard]] bool canEditInformation() const;
 	[[nodiscard]] bool canEditPermissions() const;
@@ -303,18 +349,21 @@ public:
 	[[nodiscard]] bool canAddMembers() const;
 	[[nodiscard]] bool canAddAdmins() const;
 	[[nodiscard]] bool canBanMembers() const;
-	[[nodiscard]] bool canSendPolls() const;
 	[[nodiscard]] bool anyoneCanAddMembers() const;
 
+	[[nodiscard]] bool canPostMessages() const;
 	[[nodiscard]] bool canEditMessages() const;
 	[[nodiscard]] bool canDeleteMessages() const;
+	[[nodiscard]] bool canPostStories() const;
+	[[nodiscard]] bool canEditStories() const;
+	[[nodiscard]] bool canDeleteStories() const;
 	[[nodiscard]] bool hiddenPreHistory() const;
-	[[nodiscard]] bool canPublish() const;
 	[[nodiscard]] bool canViewMembers() const;
 	[[nodiscard]] bool canViewAdmins() const;
 	[[nodiscard]] bool canViewBanned() const;
 	[[nodiscard]] bool canEditSignatures() const;
 	[[nodiscard]] bool canEditStickers() const;
+	[[nodiscard]] bool canEditEmoji() const;
 	[[nodiscard]] bool canDelete() const;
 	[[nodiscard]] bool canEditAdmin(not_null<UserData*> user) const;
 	[[nodiscard]] bool canRestrictParticipant(
@@ -393,6 +442,12 @@ public:
 	[[nodiscard]] TimeId slowmodeLastMessage() const;
 	void growSlowmodeLastMessage(TimeId when);
 
+	[[nodiscard]] int boostsApplied() const;
+	[[nodiscard]] int boostsUnrestrict() const;
+	[[nodiscard]] bool unrestrictedByBoosts() const;
+	[[nodiscard]] rpl::producer<bool> unrestrictedByBoostsValue() const;
+	void setBoostsUnrestrict(int applied, int unrestrict);
+
 	void setInvitePeek(const QString &hash, TimeId expires);
 	void clearInvitePeek();
 	[[nodiscard]] TimeId invitePeekExpires() const;
@@ -411,15 +466,26 @@ public:
 	void setGroupCallDefaultJoinAs(PeerId peerId);
 	[[nodiscard]] PeerId groupCallDefaultJoinAs() const;
 
-	void setAllowedReactions(base::flat_set<QString> list);
-	[[nodiscard]] const base::flat_set<QString> &allowedReactions() const;
+	void setAllowedReactions(Data::AllowedReactions value);
+	[[nodiscard]] const Data::AllowedReactions &allowedReactions() const;
+
+	[[nodiscard]] bool hasActiveStories() const;
+	[[nodiscard]] bool hasUnreadStories() const;
+	void setStoriesState(StoriesState state);
+
+	[[nodiscard]] Data::Forum *forum() const {
+		return mgInfo ? mgInfo->forum() : nullptr;
+	}
+
+	void processTopics(const MTPVector<MTPForumTopic> &topics);
+
+	[[nodiscard]] int levelHint() const;
+	void updateLevelHint(int levelHint);
 
 	// Still public data members.
 	uint64 access = 0;
 
 	MTPinputChannel inputChannel = MTP_inputChannelEmpty();
-
-	QString username;
 
 	int32 date = 0;
 	std::unique_ptr<MegagroupInfo> mgInfo;
@@ -443,11 +509,14 @@ private:
 
 	PtsWaiter _ptsWaiter;
 
+	Data::UsernamesInfo _username;
+
 	int _membersCount = -1;
 	int _adminsCount = 1;
 	int _restrictedCount = 0;
 	int _kickedCount = 0;
 	int _pendingRequestsCount = 0;
+	int _levelHint = 0;
 	std::vector<UserId> _recentRequesters;
 	MsgId _availableMinId = 0;
 
@@ -461,15 +530,10 @@ private:
 	QString _inviteLink;
 	std::optional<ChannelData*> _linkedChat;
 
-	base::flat_set<QString> _allowedReactions;
+	Data::AllowedReactions _allowedReactions;
 
 	std::unique_ptr<Data::GroupCall> _call;
 	PeerId _callDefaultJoinAs = 0;
-
-	int _slowmodeSeconds = 0;
-	TimeId _slowmodeLastMessage = 0;
-
-	rpl::lifetime _lifetime;
 
 };
 

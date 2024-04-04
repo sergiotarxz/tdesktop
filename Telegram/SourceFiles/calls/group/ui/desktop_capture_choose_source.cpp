@@ -15,6 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/effects/ripple_animation.h"
 #include "ui/image/image.h"
 #include "ui/platform/ui_platform_window_title.h"
+#include "ui/painter.h"
 #include "base/platform/base_platform_info.h"
 #include "webrtc/webrtc_video_track.h"
 #include "lang/lang_keys.h"
@@ -49,7 +50,7 @@ private:
 };
 
 QImage SourceButton::prepareRippleMask() const {
-	return RippleAnimation::roundRectMask(size(), st::roundRadiusLarge);
+	return RippleAnimation::RoundRectMask(size(), st::roundRadiusLarge);
 }
 
 class Source final {
@@ -113,6 +114,7 @@ private:
 	const not_null<RoundButton*> _finish;
 	const not_null<Checkbox*> _withAudio;
 
+	QSize _fixedSize;
 	std::vector<std::unique_ptr<Source>> _sources;
 	Source *_selected = nullptr;
 	QString _selectedId;
@@ -336,7 +338,7 @@ void ChooseSourceProcess::setupPanel() {
 		+ (kRows - 1) * skips.height()
 		+ (st::desktopCaptureSourceSize.height() / 2)
 		+ bottomHeight;
-	_window->setFixedSize({ width, height });
+	_fixedSize = QSize(width, height);
 	_window->setStaysOnTop(true);
 
 	_window->body()->paintRequest(
@@ -453,8 +455,10 @@ void ChooseSourceProcess::fillSources() {
 
 	auto screenIndex = 0;
 	auto windowIndex = 0;
+	auto firstScreenSelected = false;
 	const auto active = _delegate->chooseSourceActiveDeviceId();
 	const auto append = [&](const tgcalls::DesktopCaptureSource &source) {
+		const auto firstScreen = !source.isWindow() && !screenIndex;
 		const auto title = !source.isWindow()
 			? tr::lng_group_call_screen_title(
 				tr::now,
@@ -470,6 +474,10 @@ void ChooseSourceProcess::fillSources() {
 		if (!active.isEmpty() && active.toStdString() == id) {
 			_selected = raw;
 			raw->setActive(true);
+		} else if (active.isEmpty() && firstScreen) {
+			_selected = raw;
+			raw->setActive(true);
+			firstScreenSelected = true;
 		}
 		_sources.back()->activations(
 		) | rpl::filter([=] {
@@ -487,6 +495,9 @@ void ChooseSourceProcess::fillSources() {
 	}
 	for (const auto &source : windowsManager.sources()) {
 		append(source);
+	}
+	if (firstScreenSelected) {
+		updateButtonsVisibility();
 	}
 }
 
@@ -574,6 +585,7 @@ void ChooseSourceProcess::setupSourcesGeometry() {
 
 void ChooseSourceProcess::setupGeometryWithParent(
 		not_null<QWidget*> parent) {
+	_window->createWinId();
 	const auto parentScreen = [&] {
 		if (!::Platform::IsWayland()) {
 			if (const auto screen = QGuiApplication::screenAt(
@@ -585,8 +597,9 @@ void ChooseSourceProcess::setupGeometryWithParent(
 	}();
 	const auto myScreen = _window->screen();
 	if (parentScreen && myScreen != parentScreen) {
-		_window->setScreen(parentScreen);
+		_window->windowHandle()->setScreen(parentScreen);
 	}
+	_window->setFixedSize(_fixedSize);
 	_window->move(
 		parent->x() + (parent->width() - _window->width()) / 2,
 		parent->y() + (parent->height() - _window->height()) / 2);

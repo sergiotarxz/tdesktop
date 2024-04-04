@@ -7,7 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "ui/widgets/input_fields.h"
+#include "ui/widgets/fields/masked_input_field.h"
 
 namespace Ui {
 
@@ -65,9 +65,13 @@ protected:
 		int wasCursor,
 		QString &now,
 		int &nowCursor) override;
-	void paintAdditionalPlaceholder(Painter &p) override;
+	void paintAdditionalPlaceholder(QPainter &p) override;
 
 private:
+	void updatePattern(QVector<int> &&pattern);
+
+	QString _code;
+	QString _lastDigits;
 	QVector<int> _pattern;
 	QString _additionalPlaceholder;
 	rpl::event_stream<not_null<QKeyEvent*>> _frontBackspaceEvent;
@@ -92,7 +96,7 @@ protected:
 		int wasCursor,
 		QString &now,
 		int &nowCursor) override;
-	void paintAdditionalPlaceholder(Painter &p) override;
+	void paintAdditionalPlaceholder(QPainter &p) override;
 
 private:
 	QString _linkPlaceholder;
@@ -121,7 +125,7 @@ protected:
 		int wasCursor,
 		QString &now,
 		int &nowCursor) override;
-	void paintAdditionalPlaceholder(Painter &p) override;
+	void paintAdditionalPlaceholder(QPainter &p) override;
 
 private:
 	QString _defaultValue;

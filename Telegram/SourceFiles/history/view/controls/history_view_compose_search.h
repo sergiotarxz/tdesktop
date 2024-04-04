@@ -24,12 +24,16 @@ public:
 	ComposeSearch(
 		not_null<Ui::RpWidget*> parent,
 		not_null<Window::SessionController*> window,
-		not_null<History*> history);
+		not_null<History*> history,
+		PeerData *from = nullptr,
+		const QString &query = QString());
 	~ComposeSearch();
 
 	void hideAnimated();
 	void setInnerFocus();
+	void setQuery(const QString &query);
 
+	[[nodiscard]] rpl::producer<not_null<HistoryItem*>> activations() const;
 	[[nodiscard]] rpl::producer<> destroyRequests() const;
 
 	[[nodiscard]] rpl::lifetime &lifetime();

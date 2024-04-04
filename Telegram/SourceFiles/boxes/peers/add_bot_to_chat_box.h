@@ -18,16 +18,17 @@ public:
 		None,
 		GroupAdmin,
 		ChannelAdmin,
-		ShareGame,
 		All,
 	};
 	static void Start(
+		not_null<Window::SessionController*> controller,
 		not_null<UserData*> bot,
 		Scope scope = Scope::All,
 		const QString &token = QString(),
 		ChatAdminRights requestedRights = {});
 
 	AddBotToGroupBoxController(
+		not_null<Window::SessionController*> controller,
 		not_null<UserData*> bot,
 		Scope scope,
 		const QString &token,
@@ -48,14 +49,13 @@ private:
 	[[nodiscard]] bool onlyAdminToChannel() const;
 
 	bool needToCreateRow(not_null<PeerData*> peer) const;
-	bool sharingBotGame() const;
 	QString noResultsText() const;
 	void updateLabels();
 
-	void shareBotGame(not_null<PeerData*> chat);
 	void addBotToGroup(not_null<PeerData*> chat);
 	void requestExistingRights(not_null<ChannelData*> channel);
 
+	const not_null<Window::SessionController*> _controller;
 	const not_null<UserData*> _bot;
 	const Scope _scope = Scope::None;
 	const QString _token;
@@ -76,6 +76,7 @@ private:
 };
 
 void AddBotToGroup(
+	std::shared_ptr<Ui::Show> show,
 	not_null<UserData*> bot,
 	not_null<PeerData*> chat,
 	const QString &startToken);

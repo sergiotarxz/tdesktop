@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_flags.h"
 #include "data/notify/data_peer_notify_settings.h"
 #include "data/data_cloud_file.h"
+#include "ui/userpic_view.h"
 
 struct BotInfo;
 class PeerData;
@@ -20,11 +21,6 @@ class ChannelData;
 class EncryptedChatData;
 
 enum class ChatRestriction;
-
-struct BotCommand {
-	QString command;
-	QString description;
-};
 
 namespace Ui {
 class EmptyUserpic;
@@ -37,16 +33,17 @@ class Session;
 
 namespace Data {
 
+class Forum;
+class ForumTopic;
 class Session;
 class GroupCall;
-class CloudImageView;
+struct ReactionId;
+class WallPaper;
 
-int PeerColorIndex(PeerId peerId);
-int PeerColorIndex(BareId bareId);
-style::color PeerUserpicColor(PeerId peerId);
+[[nodiscard]] uint8 DecideColorIndex(PeerId peerId);
 
 // Must be used only for PeerColor-s.
-PeerId FakePeerIdForJustName(const QString &name);
+[[nodiscard]] PeerId FakePeerIdForJustName(const QString &name);
 
 class RestrictionCheckResult {
 public:
@@ -101,19 +98,31 @@ struct UnavailableReason {
 	}
 };
 
-bool UpdateBotCommands(
-	std::vector<BotCommand> &commands,
-	const MTPVector<MTPBotCommand> &data);
-bool UpdateBotCommands(
-	base::flat_map<UserId, std::vector<BotCommand>> &commands,
-	UserId botId,
-	const MTPVector<MTPBotCommand> &data);
-bool UpdateBotCommands(
-	base::flat_map<UserId, std::vector<BotCommand>> &commands,
-	const MTPVector<MTPBotInfo> &data);
 bool ApplyBotMenuButton(
 	not_null<BotInfo*> info,
-	const MTPBotMenuButton &button);
+	const MTPBotMenuButton *button);
+
+enum class AllowedReactionsType {
+	All,
+	Default,
+	Some,
+};
+
+struct AllowedReactions {
+	std::vector<ReactionId> some;
+	AllowedReactionsType type = AllowedReactionsType::Some;
+};
+
+bool operator<(const AllowedReactions &a, const AllowedReactions &b);
+bool operator==(const AllowedReactions &a, const AllowedReactions &b);
+
+[[nodiscard]] AllowedReactions Parse(const MTPChatReactions &value);
+[[nodiscard]] PeerData *PeerFromInputMTP(
+	not_null<Session*> owner,
+	const MTPInputPeer &input);
+[[nodiscard]] UserData *UserFromInputMTP(
+	not_null<Session*> owner,
+	const MTPInputUser &input);
 
 } // namespace Data
 
@@ -131,7 +140,7 @@ private:
 
 };
 
-enum class PeerSetting {
+enum class PeerBarSetting {
 	ReportSpam = (1 << 0),
 	AddContact = (1 << 1),
 	BlockContact = (1 << 2),
@@ -140,10 +149,20 @@ enum class PeerSetting {
 	AutoArchived = (1 << 5),
 	RequestChat = (1 << 6),
 	RequestChatIsBroadcast = (1 << 7),
-	Unknown = (1 << 8),
+	HasBusinessBot = (1 << 8),
+	BusinessBotPaused = (1 << 9),
+	BusinessBotCanReply = (1 << 10),
+	Unknown = (1 << 11),
 };
-inline constexpr bool is_flag_type(PeerSetting) { return true; };
-using PeerSettings = base::flags<PeerSetting>;
+inline constexpr bool is_flag_type(PeerBarSetting) { return true; };
+using PeerBarSettings = base::flags<PeerBarSetting>;
+
+struct PeerBarDetails {
+	QString requestChatTitle;
+	TimeId requestChatDate;
+	UserData *businessBot = nullptr;
+	QString businessBotManageUrl;
+};
 
 class PeerData {
 protected:
@@ -152,15 +171,28 @@ protected:
 	PeerData &operator=(const PeerData &other) = delete;
 
 public:
-	using Settings = Data::Flags<PeerSettings>;
+	using BarSettings = Data::Flags<PeerBarSettings>;
 
 	virtual ~PeerData();
 
 	static constexpr auto kServiceNotificationsId = peerFromUser(777000);
+	static constexpr auto kSavedHiddenAuthorId = peerFromUser(2666000);
 
 	[[nodiscard]] Data::Session &owner() const;
 	[[nodiscard]] Main::Session &session() const;
 	[[nodiscard]] Main::Account &account() const;
+
+	[[nodiscard]] uint8 colorIndex() const {
+		return _colorIndex;
+	}
+	bool changeColorIndex(uint8 index);
+	bool clearColorIndex();
+	[[nodiscard]] DocumentId backgroundEmojiId() const;
+	bool changeBackgroundEmojiId(DocumentId id);
+
+	void setEmojiStatus(const MTPEmojiStatus &status);
+	void setEmojiStatus(DocumentId emojiStatusId, TimeId until = 0);
+	[[nodiscard]] DocumentId emojiStatusId() const;
 
 	[[nodiscard]] bool isUser() const {
 		return peerIsUser(id);
@@ -176,15 +208,18 @@ public:
 	}
 	[[nodiscard]] bool isSelf() const;
 	[[nodiscard]] bool isVerified() const;
+	[[nodiscard]] bool isPremium() const;
 	[[nodiscard]] bool isScam() const;
 	[[nodiscard]] bool isFake() const;
 	[[nodiscard]] bool isMegagroup() const;
 	[[nodiscard]] bool isBroadcast() const;
+	[[nodiscard]] bool isForum() const;
 	[[nodiscard]] bool isGigagroup() const;
 	[[nodiscard]] bool isRepliesChat() const;
-	[[nodiscard]] bool sharedMediaInfo() const {
-		return isSelf() || isRepliesChat();
-	}
+	[[nodiscard]] bool sharedMediaInfo() const;
+	[[nodiscard]] bool savedSublistsInfo() const;
+	[[nodiscard]] bool hasStoriesHidden() const;
+	void setStoriesHidden(bool hidden);
 
 	[[nodiscard]] bool isNotificationsUser() const {
 		return (id == peerFromUser(333000))
@@ -193,33 +228,20 @@ public:
 	[[nodiscard]] bool isServiceUser() const {
 		return isUser() && !(id.value % 1000);
 	}
-
-	[[nodiscard]] std::optional<TimeId> notifyMuteUntil() const {
-		return _notify.muteUntil();
-	}
-	bool notifyChange(const MTPPeerNotifySettings &settings) {
-		return _notify.change(settings);
-	}
-	bool notifyChange(
-			std::optional<int> muteForSeconds,
-			std::optional<bool> silentPosts,
-			std::optional<Data::NotifySound> sound) {
-		return _notify.change(muteForSeconds, silentPosts, sound);
-	}
-	[[nodiscard]] bool notifySettingsUnknown() const {
-		return _notify.settingsUnknown();
-	}
-	[[nodiscard]] std::optional<bool> notifySilentPosts() const {
-		return _notify.silentPosts();
-	}
-	[[nodiscard]] std::optional<Data::NotifySound> notifySound() const {
-		return _notify.sound();
-	}
-	[[nodiscard]] MTPinputPeerNotifySettings notifySerialize() const {
-		return _notify.serialize();
+	[[nodiscard]] bool isSavedHiddenAuthor() const {
+		return (id == kSavedHiddenAuthorId);
 	}
 
-	[[nodiscard]] bool canWrite() const;
+	[[nodiscard]] Data::Forum *forum() const;
+	[[nodiscard]] Data::ForumTopic *forumTopicFor(MsgId rootId) const;
+
+	[[nodiscard]] Data::PeerNotifySettings &notify() {
+		return _notify;
+	}
+	[[nodiscard]] const Data::PeerNotifySettings &notify() const {
+		return _notify;
+	}
+
 	[[nodiscard]] bool allowsForwarding() const;
 	[[nodiscard]] Data::RestrictionCheckResult amRestricted(
 		ChatRestriction right) const;
@@ -228,7 +250,6 @@ public:
 	[[nodiscard]] bool slowmodeApplied() const;
 	[[nodiscard]] rpl::producer<bool> slowmodeAppliedValue() const;
 	[[nodiscard]] int slowmodeSecondsLeft() const;
-	[[nodiscard]] bool canSendPolls() const;
 	[[nodiscard]] bool canManageGroupCall() const;
 
 	[[nodiscard]] UserData *asUser();
@@ -260,10 +281,15 @@ public:
 		return (_lastFullUpdate != 0);
 	}
 
-	[[nodiscard]] const Ui::Text::String &nameText() const;
+	[[nodiscard]] int nameVersion() const;
+	[[nodiscard]] const QString &name() const;
 	[[nodiscard]] const QString &shortName() const;
-	[[nodiscard]] const Ui::Text::String &topBarNameText() const;
-	[[nodiscard]] QString userName() const;
+	[[nodiscard]] const QString &topBarNameText() const;
+
+	[[nodiscard]] QString username() const;
+	[[nodiscard]] QString editableUsername() const;
+	[[nodiscard]] const std::vector<QString> &usernames() const;
+	[[nodiscard]] bool isUsernameEditable(QString username) const;
 
 	[[nodiscard]] const base::flat_set<QString> &nameWords() const {
 		return _nameWords;
@@ -272,17 +298,20 @@ public:
 		return _nameFirstLetters;
 	}
 
-	void setUserpic(PhotoId photoId, const ImageLocation &location);
+	void setUserpic(
+		PhotoId photoId,
+		const ImageLocation &location,
+		bool hasVideo);
 	void setUserpicPhoto(const MTPPhoto &data);
 	void paintUserpic(
 		Painter &p,
-		std::shared_ptr<Data::CloudImageView> &view,
+		Ui::PeerUserpicView &view,
 		int x,
 		int y,
 		int size) const;
 	void paintUserpicLeft(
 			Painter &p,
-			std::shared_ptr<Data::CloudImageView> &view,
+			Ui::PeerUserpicView &view,
 			int x,
 			int y,
 			int w,
@@ -291,41 +320,20 @@ public:
 	}
 	void loadUserpic();
 	[[nodiscard]] bool hasUserpic() const;
-	[[nodiscard]] std::shared_ptr<Data::CloudImageView> activeUserpicView();
-	[[nodiscard]] std::shared_ptr<Data::CloudImageView> createUserpicView();
-	[[nodiscard]] bool useEmptyUserpic(
-		std::shared_ptr<Data::CloudImageView> &view) const;
-	[[nodiscard]] InMemoryKey userpicUniqueKey(
-		std::shared_ptr<Data::CloudImageView> &view) const;
-	void saveUserpic(
-		std::shared_ptr<Data::CloudImageView> &view,
-		const QString &path,
-		int size) const;
-	void saveUserpicRounded(
-		std::shared_ptr<Data::CloudImageView> &view,
-		const QString &path,
-		int size) const;
-	[[nodiscard]] QPixmap genUserpic(
-		std::shared_ptr<Data::CloudImageView> &view,
-		int size) const;
+	[[nodiscard]] Ui::PeerUserpicView activeUserpicView();
+	[[nodiscard]] Ui::PeerUserpicView createUserpicView();
+	[[nodiscard]] bool useEmptyUserpic(Ui::PeerUserpicView &view) const;
+	[[nodiscard]] InMemoryKey userpicUniqueKey(Ui::PeerUserpicView &view) const;
 	[[nodiscard]] QImage generateUserpicImage(
-		std::shared_ptr<Data::CloudImageView> &view,
-		int size) const;
-	[[nodiscard]] QImage generateUserpicImage(
-		std::shared_ptr<Data::CloudImageView> &view,
+		Ui::PeerUserpicView &view,
 		int size,
-		ImageRoundRadius radius) const;
-	[[nodiscard]] ImageLocation userpicLocation() const {
-		return _userpic.location();
-	}
+		std::optional<int> radius = {}) const;
+	[[nodiscard]] ImageLocation userpicLocation() const;
 
 	static constexpr auto kUnknownPhotoId = PhotoId(0xFFFFFFFFFFFFFFFFULL);
-	[[nodiscard]] bool userpicPhotoUnknown() const {
-		return (_userpicPhotoId == kUnknownPhotoId);
-	}
-	[[nodiscard]] PhotoId userpicPhotoId() const {
-		return userpicPhotoUnknown() ? 0 : _userpicPhotoId;
-	}
+	[[nodiscard]] bool userpicPhotoUnknown() const;
+	[[nodiscard]] PhotoId userpicPhotoId() const;
+	[[nodiscard]] bool userpicHasVideo() const;
 	[[nodiscard]] Data::FileOrigin userpicOrigin() const;
 	[[nodiscard]] Data::FileOrigin userpicPhotoOrigin() const;
 
@@ -341,12 +349,13 @@ public:
 		return _openLink;
 	}
 
-	[[nodiscard]] Image *currentUserpic(
-		std::shared_ptr<Data::CloudImageView> &view) const;
+	[[nodiscard]] QImage *userpicCloudImage(Ui::PeerUserpicView &view) const;
 
 	[[nodiscard]] bool canPinMessages() const;
 	[[nodiscard]] bool canEditMessagesIndefinitely() const;
-
+	[[nodiscard]] bool canCreatePolls() const;
+	[[nodiscard]] bool canCreateTopics() const;
+	[[nodiscard]] bool canManageTopics() const;
 	[[nodiscard]] bool canExportChatHistory() const;
 
 	// Returns true if about text was changed.
@@ -357,27 +366,39 @@ public:
 
 	void checkFolder(FolderId folderId);
 
-	void setSettings(PeerSettings which) {
-		_settings.set(which);
+	void setBarSettings(PeerBarSettings which) {
+		_barSettings.set(which);
 	}
-	[[nodiscard]] auto settings() const {
-		return (_settings.current() & PeerSetting::Unknown)
+	[[nodiscard]] auto barSettings() const {
+		return (_barSettings.current() & PeerBarSetting::Unknown)
 			? std::nullopt
-			: std::make_optional(_settings.current());
+			: std::make_optional(_barSettings.current());
 	}
-	[[nodiscard]] auto settingsValue() const {
-		return (_settings.current() & PeerSetting::Unknown)
-			? _settings.changes()
-			: (_settings.value() | rpl::type_erased());
+	[[nodiscard]] auto barSettingsValue() const {
+		return (_barSettings.current() & PeerBarSetting::Unknown)
+			? _barSettings.changes()
+			: (_barSettings.value() | rpl::type_erased());
 	}
-	[[nodiscard]] QString requestChatTitle() const {
-		return _requestChatTitle;
-	}
-	[[nodiscard]] TimeId requestChatDate() const {
-		return _requestChatDate;
-	}
+	[[nodiscard]] QString requestChatTitle() const;
+	[[nodiscard]] TimeId requestChatDate() const;
+	[[nodiscard]] UserData *businessBot() const;
+	[[nodiscard]] QString businessBotManageUrl() const;
+	void clearBusinessBot();
 
-	void setSettings(const MTPPeerSettings &data);
+	enum class TranslationFlag : uchar {
+		Unknown,
+		Disabled,
+		Enabled,
+	};
+	void setTranslationDisabled(bool disabled);
+	[[nodiscard]] TranslationFlag translationFlag() const;
+	void saveTranslationDisabled(bool disabled);
+
+	void setBarSettings(const MTPPeerSettings &data);
+	bool changeColorIndex(const tl::conditional<MTPint> &cloudColorIndex);
+	bool changeBackgroundEmojiId(
+		const tl::conditional<MTPlong> &cloudBackgroundEmoji);
+	bool changeColor(const tl::conditional<MTPPeerColor> &cloudColor);
 
 	enum class BlockStatus : char {
 		Unknown,
@@ -422,13 +443,28 @@ public:
 	[[nodiscard]] const QString &themeEmoji() const;
 
 	const PeerId id;
-	QString name;
 	MTPinputPeer input = MTP_inputPeerEmpty();
 	[[nodiscard]] const Data::CloudImage *getUserpic() const {
 		return &_userpic;
 	}
+	void setWallPaper(
+		std::optional<Data::WallPaper> paper,
+		bool overriden = false);
+	[[nodiscard]] bool wallPaperOverriden() const;
+	[[nodiscard]] const Data::WallPaper *wallPaper() const;
 
-	int nameVersion = 1;
+	enum class StoriesState {
+		Unknown,
+		None,
+		HasRead,
+		HasUnread,
+	};
+	[[nodiscard]] bool hasActiveStories() const;
+	[[nodiscard]] bool hasUnreadStories() const;
+	void setStoriesState(StoriesState state);
+
+	const PeerId id;
+	MTPinputPeer input = MTP_inputPeerEmpty();
 
 protected:
 	mutable Data::CloudImage _userpic;
@@ -436,8 +472,9 @@ protected:
 		const QString &newName,
 		const QString &newNameOrPhone,
 		const QString &newUsername);
-	void updateUserpic(PhotoId photoId, MTP::DcId dcId);
+	void updateUserpic(PhotoId photoId, MTP::DcId dcId, bool hasVideo);
 	void clearUserpic();
+	void invalidateEmptyUserpic();
 
 private:
 	void fillNames();
@@ -445,13 +482,16 @@ private:
 	[[nodiscard]] virtual auto unavailableReasons() const
 		-> const std::vector<Data::UnavailableReason> &;
 
-	void setUserpicChecked(PhotoId photoId, const ImageLocation &location);
+	void setUserpicChecked(
+		PhotoId photoId,
+		const ImageLocation &location,
+		bool hasVideo);
 
 	const not_null<Data::Session*> _owner;
 
 	PhotoId _userpicPhotoId = kUnknownPhotoId;
+
 	mutable std::unique_ptr<Ui::EmptyUserpic> _userpicEmpty;
-	Ui::Text::String _nameText;
 
 	Data::PeerNotifySettings _notify;
 
@@ -459,37 +499,43 @@ private:
 	base::flat_set<QString> _nameWords; // for filtering
 	base::flat_set<QChar> _nameFirstLetters;
 
+	DocumentId _emojiStatusId = 0;
+	uint64 _backgroundEmojiId = 0;
 	crl::time _lastFullUpdate = 0;
+
+	QString _name;
+	uint32 _nameVersion : 31 = 1;
+	uint32 _wallPaperOverriden : 1 = 0;
 
 	TimeId _ttlPeriod = 0;
 
-	Settings _settings = PeerSettings(PeerSetting::Unknown);
+	BarSettings _barSettings = PeerBarSettings(PeerBarSetting::Unknown);
+	std::unique_ptr<PeerBarDetails> _barDetails;
+
 	BlockStatus _blockStatus = BlockStatus::Unknown;
 	LoadedStatus _loadedStatus = LoadedStatus::Not;
-
-	TimeId _requestChatDate = 0;
+	TranslationFlag _translationFlag = TranslationFlag::Unknown;
+	uint8 _colorIndex : 6 = 0;
+	uint8 _colorIndexCloud : 1 = 0;
+	uint8 _userpicHasVideo : 1 = 0;
 
 	QString _about;
 	QString _themeEmoticon;
-protected:
-	QString _requestChatTitle;
+	std::unique_ptr<Data::WallPaper> _wallPaper;
 };
 
 namespace Data {
 
-std::optional<QString> RestrictionError(
+void SetTopPinnedMessageId(
 	not_null<PeerData*> peer,
-	ChatRestriction restriction);
-
-void SetTopPinnedMessageId(not_null<PeerData*> peer, MsgId messageId);
+	MsgId messageId);
 [[nodiscard]] FullMsgId ResolveTopPinnedId(
 	not_null<PeerData*> peer,
-	PeerData *migrated);
+	MsgId topicRootId,
+	PeerData *migrated = nullptr);
 [[nodiscard]] FullMsgId ResolveMinPinnedId(
 	not_null<PeerData*> peer,
-	PeerData *migrated);
-[[nodiscard]] std::optional<int> ResolvePinnedCount(
-	not_null<PeerData*> peer,
-	PeerData *migrated);
+	MsgId topicRootId,
+	PeerData *migrated = nullptr);
 
 } // namespace Data

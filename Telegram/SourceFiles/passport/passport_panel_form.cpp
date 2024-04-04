@@ -13,6 +13,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/abstract_box.h"
 #include "core/click_handler_types.h"
 #include "data/data_user.h"
+#include "ui/controls/userpic_button.h"
 #include "ui/effects/animations.h"
 #include "ui/effects/scroll_content_shadow.h"
 #include "ui/widgets/buttons.h"
@@ -23,7 +24,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/padding_wrap.h"
 #include "ui/text/text_utilities.h"
 #include "ui/text/text_options.h"
-#include "ui/special_buttons.h"
 #include "styles/style_passport.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
@@ -73,7 +73,6 @@ not_null<Ui::RpWidget*> PanelForm::setupContent() {
 		object_ptr<Ui::UserpicButton>(
 			userpicWrap,
 			bot,
-			Ui::UserpicButton::Role::Custom,
 			st::passportFormUserpic));
 	userpicWrap->widthValue(
 	) | rpl::start_with_next([=](int width) {
@@ -85,7 +84,7 @@ not_null<Ui::RpWidget*> PanelForm::setupContent() {
 			inner,
 			object_ptr<Ui::FlatLabel>(
 				inner,
-				tr::lng_passport_request1(tr::now, lt_bot, bot->name),
+				tr::lng_passport_request1(tr::now, lt_bot, bot->name()),
 				st::passportPasswordLabelBold)),
 		st::passportFormAbout1Padding)->entity();
 
@@ -145,19 +144,24 @@ not_null<Ui::RpWidget*> PanelForm::setupContent() {
 		});
 	}, lifetime());
 	const auto policyUrl = _controller->privacyPolicyUrl();
+	auto policyLink = tr::lng_passport_policy(
+		lt_bot,
+		rpl::single(bot->name())
+	) | Ui::Text::ToLink(
+		policyUrl
+	) | rpl::map([=](TextWithEntities &&text) {
+		return Ui::Text::Wrapped(std::move(text), EntityType::Bold);
+	});
 	auto text = policyUrl.isEmpty()
 		? tr::lng_passport_allow(
 			lt_bot,
-			rpl::single('@' + bot->username)
+			rpl::single('@' + bot->username())
 		) | Ui::Text::ToWithEntities()
 		: tr::lng_passport_accept_allow(
 			lt_policy,
-			tr::lng_passport_policy(
-				lt_bot,
-				rpl::single(bot->name)
-			) | Ui::Text::ToLink(policyUrl),
+			std::move(policyLink),
 			lt_bot,
-			rpl::single('@' + bot->username) | Ui::Text::ToWithEntities(),
+			rpl::single('@' + bot->username()) | Ui::Text::ToWithEntities(),
 			Ui::Text::WithEntities);
 	const auto policy = inner->add(
 		object_ptr<Ui::FlatLabel>(

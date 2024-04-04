@@ -15,6 +15,10 @@ namespace Api {
 struct InviteLink;
 } // namespace Api
 
+namespace Main {
+class Session;
+} // namespace Main
+
 namespace Ui {
 class VerticalLayout;
 class Show;
@@ -34,11 +38,19 @@ void AddPermanentLinkBlock(
 	not_null<UserData*> admin,
 	rpl::producer<Api::InviteLink> fromList);
 
-void CopyInviteLink(not_null<QWidget*> toastParent, const QString &link);
+void CopyInviteLink(std::shared_ptr<Ui::Show> show, const QString &link);
 [[nodiscard]] object_ptr<Ui::BoxContent> ShareInviteLinkBox(
 	not_null<PeerData*> peer,
-	const QString &link);
-[[nodiscard]] object_ptr<Ui::BoxContent> InviteLinkQrBox(const QString &link);
+	const QString &link,
+	const QString &copied = {});
+[[nodiscard]] object_ptr<Ui::BoxContent> ShareInviteLinkBox(
+	not_null<Main::Session*> session,
+	const QString &link,
+	const QString &copied = {});
+[[nodiscard]] object_ptr<Ui::BoxContent> InviteLinkQrBox(
+	const QString &link,
+	rpl::producer<QString> title,
+	rpl::producer<QString> about);
 [[nodiscard]] object_ptr<Ui::BoxContent> RevokeLinkBox(
 	not_null<PeerData*> peer,
 	not_null<UserData*> admin,

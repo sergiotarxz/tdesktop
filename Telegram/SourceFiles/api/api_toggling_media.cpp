@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_file_origin.h"
 #include "data/data_session.h"
 #include "data/stickers/data_stickers.h"
+#include "window/window_session_controller.h"
 #include "main/main_session.h"
 
 namespace Api {
@@ -47,28 +48,34 @@ void ToggleExistingMedia(
 } // namespace
 
 void ToggleFavedSticker(
+		std::shared_ptr<ChatHelpers::Show> show,
 		not_null<DocumentData*> document,
 		Data::FileOrigin origin) {
 	ToggleFavedSticker(
+		std::move(show),
 		document,
 		std::move(origin),
 		!document->owner().stickers().isFaved(document));
 }
 
 void ToggleFavedSticker(
+		std::shared_ptr<ChatHelpers::Show> show,
 		not_null<DocumentData*> document,
 		Data::FileOrigin origin,
 		bool faved) {
 	if (faved && !document->sticker()) {
 		return;
 	}
+	auto done = [=] {
+		document->owner().stickers().setFaved(show, document, faved);
+	};
 	ToggleExistingMedia(
 		document,
 		std::move(origin),
 		[=, d = document] {
 			return MTPmessages_FaveSticker(d->mtpInput(), MTP_bool(!faved));
 		},
-		[=] { document->owner().stickers().setFaved(document, faved); });
+		std::move(done));
 }
 
 void ToggleRecentSticker(
@@ -96,6 +103,7 @@ void ToggleRecentSticker(
 }
 
 void ToggleSavedGif(
+		std::shared_ptr<ChatHelpers::Show> show,
 		not_null<DocumentData*> document,
 		Data::FileOrigin origin,
 		bool saved) {
@@ -104,7 +112,7 @@ void ToggleSavedGif(
 	}
 	auto done = [=] {
 		if (saved) {
-			document->owner().stickers().addSavedGif(document);
+			document->owner().stickers().addSavedGif(show, document);
 		}
 	};
 	ToggleExistingMedia(

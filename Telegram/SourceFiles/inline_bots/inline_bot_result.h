@@ -16,6 +16,7 @@ class FileLoader;
 class History;
 class UserData;
 struct HistoryMessageMarkupData;
+struct HistoryItemCommonFields;
 
 namespace Data {
 class LocationPoint;
@@ -63,15 +64,9 @@ public:
 	bool hasThumbDisplay() const;
 
 	void addToHistory(
-		History *history,
-		MessageFlags flags,
-		MsgId msgId,
-		PeerId fromId,
-		TimeId date,
-		UserId viaBotId,
-		MsgId replyToId,
-		const QString &postAuthor) const;
-	QString getErrorOnSend(History *history) const;
+		not_null<History*> history,
+		HistoryItemCommonFields &&fields) const;
+	QString getErrorOnSend(not_null<History*> history) const;
 
 	// interface for Layout:: usage
 	std::optional<Data::LocationPoint> getLocationPoint() const;

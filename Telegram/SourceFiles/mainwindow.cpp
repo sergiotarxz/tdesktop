@@ -16,22 +16,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/widgets/buttons.h"
 #include "ui/widgets/shadow.h"
 #include "ui/widgets/tooltip.h"
-#include "ui/layers/layer_widget.h"
 #include "ui/emoji_config.h"
-#include "ui/ui_utility.h"
 #include "lang/lang_cloud_manager.h"
 #include "lang/lang_instance.h"
-#include "lang/lang_keys.h"
-#include "core/shortcuts.h"
 #include "core/sandbox.h"
 #include "core/application.h"
 #include "export/export_manager.h"
+#include "inline_bots/bot_attach_web_view.h" // AttachWebView::cancel.
 #include "intro/intro_widget.h"
 #include "main/main_session.h"
 #include "main/main_account.h" // Account::sessionValue.
 #include "main/main_domain.h"
 #include "mainwidget.h"
-#include "media/system_media_controls_manager.h"
 #include "ui/boxes/confirm_box.h"
 #include "boxes/connection_box.h"
 #include "storage/storage_account.h"
@@ -39,24 +35,19 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "apiwrap.h"
 #include "api/api_updates.h"
 #include "settings/settings_intro.h"
-#include "platform/platform_notifications_manager.h"
-#include "base/platform/base_platform_info.h"
-#include "base/variant.h"
+#include "base/options.h"
 #include "window/notifications_manager.h"
 #include "window/themes/window_theme.h"
 #include "window/themes/window_theme_warning.h"
-#include "window/window_lock_widgets.h"
 #include "window/window_main_menu.h"
 #include "window/window_controller.h" // App::wnd.
 #include "window/window_session_controller.h"
 #include "window/window_media_preview.h"
-#include "facades.h"
 #include "styles/style_dialogs.h"
 #include "styles/style_layers.h"
 #include "styles/style_window.h"
 
 #include <QtGui/QWindow>
-#include <QtCore/QCoreApplication>
 
 namespace {
 
@@ -77,7 +68,17 @@ void FeedLangTestingKey(int key) {
 	}
 }
 
+base::options::toggle AutoScrollInactiveChat({
+	.id = kOptionAutoScrollInactiveChat,
+	.name = "Mark as read of inactive chat",
+	.description = "Mark new messages as read and scroll the chat "
+		"even when the window is not in focus.",
+});
+
 } // namespace
+
+const char kOptionAutoScrollInactiveChat[] =
+	"auto-scroll-inactive-chat";
 
 MainWindow::MainWindow(not_null<Window::Controller*> controller)
 : Platform::MainWindow(controller) {
@@ -106,41 +107,29 @@ MainWindow::MainWindow(not_null<Window::Controller*> controller)
 
 void MainWindow::initHook() {
 	Platform::MainWindow::initHook();
-
 	QCoreApplication::instance()->installEventFilter(this);
-
-	// Non-queued activeChanged handlers must use QtSignalProducer.
-	connect(
-		windowHandle(),
-		&QWindow::activeChanged,
-		this,
-		[=] { checkHistoryActivation(); },
-		Qt::QueuedConnection);
-
-	if (Media::SystemMediaControlsManager::Supported()) {
-		using MediaManager = Media::SystemMediaControlsManager;
-		_mediaControlsManager = std::make_unique<MediaManager>(&controller());
-	}
 }
 
 void MainWindow::applyInitialWorkMode() {
 	const auto workMode = Core::App().settings().workMode();
 	workmodeUpdated(workMode);
 
-	if (Core::App().settings().windowPosition().maximized) {
-		DEBUG_LOG(("Window Pos: First show, setting maximized."));
-		setWindowState(Qt::WindowMaximized);
-	}
-	if (cStartInTray()
-		|| (cLaunchMode() == LaunchModeAutoStart
-			&& cStartMinimized()
-			&& !Core::App().passcodeLocked())) {
-		DEBUG_LOG(("Window Pos: First show, setting minimized after."));
-		if (workMode == Core::Settings::WorkMode::TrayOnly
-			|| workMode == Core::Settings::WorkMode::WindowAndTray) {
-			hide();
-		} else {
-			setWindowState(windowState() | Qt::WindowMinimized);
+	if (controller().isPrimary()) {
+		if (Core::App().settings().windowPosition().maximized) {
+			DEBUG_LOG(("Window Pos: First show, setting maximized."));
+			setWindowState(Qt::WindowMaximized);
+		}
+		if (cStartInTray()
+			|| (cLaunchMode() == LaunchModeAutoStart
+				&& cStartMinimized()
+				&& !Core::App().passcodeLocked())) {
+			DEBUG_LOG(("Window Pos: First show, setting minimized after."));
+			if (workMode == Core::Settings::WorkMode::TrayOnly
+				|| workMode == Core::Settings::WorkMode::WindowAndTray) {
+				hide();
+			} else {
+				setWindowState(windowState() | Qt::WindowMinimized);
+			}
 		}
 	}
 	setPositionInited();
@@ -156,6 +145,10 @@ void MainWindow::finishFirstShow() {
 	}, lifetime());
 
 	setAttribute(Qt::WA_NoSystemBackground);
+
+	if (!_passcodeLock && _main) {
+		_main->activate();
+	}
 }
 
 void MainWindow::clearWidgetsHook() {
@@ -167,15 +160,8 @@ void MainWindow::clearWidgetsHook() {
 	}
 }
 
-QPixmap MainWindow::grabInner() {
-	if (_passcodeLock) {
-		return Ui::GrabWidget(_passcodeLock);
-	} else if (_intro) {
-		return Ui::GrabWidget(_intro);
-	} else if (_main) {
-		return Ui::GrabWidget(_main);
-	}
-	return {};
+QPixmap MainWindow::grabForSlideAnimation() {
+	return Ui::GrabWidget(bodyWidget());
 }
 
 void MainWindow::preventOrInvoke(Fn<void()> callback) {
@@ -187,11 +173,10 @@ void MainWindow::preventOrInvoke(Fn<void()> callback) {
 
 void MainWindow::setupPasscodeLock() {
 	auto animated = (_main || _intro);
-	auto bg = animated ? grabInner() : QPixmap();
+	auto oldContentCache = animated ? grabForSlideAnimation() : QPixmap();
 	_passcodeLock.create(bodyWidget(), &controller());
 	updateControlsGeometry();
 
-	Core::App().hideMediaView();
 	ui_hideSettingsAndLayer(anim::type::instant);
 	if (_main) {
 		_main->hide();
@@ -200,37 +185,41 @@ void MainWindow::setupPasscodeLock() {
 		_intro->hide();
 	}
 	if (animated) {
-		_passcodeLock->showAnimated(bg);
+		_passcodeLock->showAnimated(std::move(oldContentCache));
 	} else {
 		_passcodeLock->showFinished();
 		setInnerFocus();
 	}
+	if (const auto sessionController = controller().sessionController()) {
+		sessionController->session().attachWebView().cancel();
+	}
 }
 
 void MainWindow::clearPasscodeLock() {
+	Expects(_intro || _main);
+
 	if (!_passcodeLock) {
 		return;
 	}
 
+	auto oldContentCache = grabForSlideAnimation();
+	_passcodeLock.destroy();
 	if (_intro) {
-		auto bg = grabInner();
-		_passcodeLock.destroy();
 		_intro->show();
 		updateControlsGeometry();
-		_intro->showAnimated(bg, true);
+		_intro->showAnimated(std::move(oldContentCache), true);
 	} else if (_main) {
-		auto bg = grabInner();
-		_passcodeLock.destroy();
 		_main->show();
 		updateControlsGeometry();
-		_main->showAnimated(bg, true);
+		_main->showAnimated(std::move(oldContentCache), true);
 		Core::App().checkStartUrl();
 	}
 }
 
-void MainWindow::setupIntro(Intro::EnterPoint point) {
+void MainWindow::setupIntro(
+		Intro::EnterPoint point,
+		QPixmap oldContentCache) {
 	auto animated = (_main || _passcodeLock);
-	auto bg = animated ? grabInner() : QPixmap();
 
 	destroyLayer();
 	auto created = object_ptr<Intro::Widget>(
@@ -251,7 +240,7 @@ void MainWindow::setupIntro(Intro::EnterPoint point) {
 		_intro->show();
 		updateControlsGeometry();
 		if (animated) {
-			_intro->showAnimated(bg);
+			_intro->showAnimated(std::move(oldContentCache));
 		} else {
 			setInnerFocus();
 		}
@@ -259,12 +248,13 @@ void MainWindow::setupIntro(Intro::EnterPoint point) {
 	fixOrder();
 }
 
-void MainWindow::setupMain(MsgId singlePeerShowAtMsgId) {
+void MainWindow::setupMain(
+		MsgId singlePeerShowAtMsgId,
+		QPixmap oldContentCache) {
 	Expects(account().sessionExists());
 
 	const auto animated = _intro
 		|| (_passcodeLock && !Core::App().passcodeLocked());
-	const auto bg = animated ? grabInner() : QPixmap();
 	const auto weakAnimatedLayer = (_main && _layer && !_passcodeLock)
 		? Ui::MakeWeak(_layer.get())
 		: nullptr;
@@ -278,6 +268,7 @@ void MainWindow::setupMain(MsgId singlePeerShowAtMsgId) {
 	clearWidgets();
 	_main = std::move(created);
 	if (const auto peer = singlePeer()) {
+		updateControlsGeometry();
 		_main->controller()->showPeerHistory(
 			peer,
 			Window::SectionShow::Way::ClearStack,
@@ -289,7 +280,7 @@ void MainWindow::setupMain(MsgId singlePeerShowAtMsgId) {
 		_main->show();
 		updateControlsGeometry();
 		if (animated) {
-			_main->showAnimated(bg);
+			_main->showAnimated(std::move(oldContentCache));
 		} else {
 			_main->activate();
 		}
@@ -355,7 +346,8 @@ void MainWindow::ensureLayerCreated() {
 		return;
 	}
 	_layer = base::make_unique_q<Ui::LayerStackWidget>(
-		bodyWidget());
+		bodyWidget(),
+		crl::guard(this, [=] { return controller().uiShow(); }));
 
 	_layer->hideFinishEvents(
 	) | rpl::filter([=] {
@@ -388,7 +380,7 @@ void MainWindow::destroyLayer() {
 		setInnerFocus();
 	}
 	InvokeQueued(this, [=] {
-		checkHistoryActivation();
+		checkActivation();
 	});
 }
 
@@ -410,7 +402,7 @@ MainWidget *MainWindow::sessionContent() const {
 	return _main.data();
 }
 
-void MainWindow::showBoxOrLayer(
+void MainWindow::showOrHideBoxOrLayer(
 		std::variant<
 			v::null_t,
 			object_ptr<Ui::BoxContent>,
@@ -422,7 +414,7 @@ void MainWindow::showBoxOrLayer(
 	if (auto layerWidget = std::get_if<UniqueLayer>(&layer)) {
 		ensureLayerCreated();
 		_layer->showLayer(std::move(*layerWidget), options, animated);
-	} else if (auto box = std::get_if<ObjectBox>(&layer); *box != nullptr) {
+	} else if (auto box = std::get_if<ObjectBox>(&layer)) {
 		ensureLayerCreated();
 		_layer->showBox(std::move(*box), options, animated);
 	} else {
@@ -438,21 +430,7 @@ void MainWindow::showBoxOrLayer(
 	}
 }
 
-void MainWindow::ui_showBox(
-		object_ptr<Ui::BoxContent> box,
-		Ui::LayerOptions options,
-		anim::type animated) {
-	showBoxOrLayer(std::move(box), options, animated);
-}
-
-void MainWindow::showLayer(
-		std::unique_ptr<Ui::LayerWidget> &&layer,
-		Ui::LayerOptions options,
-		anim::type animated) {
-	showBoxOrLayer(std::move(layer), options, animated);
-}
-
-bool MainWindow::ui_isLayerShown() {
+bool MainWindow::ui_isLayerShown() const {
 	return _layer != nullptr;
 }
 
@@ -532,24 +510,28 @@ void MainWindow::themeUpdated(const Window::Theme::BackgroundUpdate &data) {
 	}
 }
 
-bool MainWindow::doWeMarkAsRead() {
-	if (!_main || Ui::isLayerShown()) {
-		return false;
-	}
-	return isActive() && _main->doWeMarkAsRead();
+bool MainWindow::markingAsRead() const {
+	return _main
+		&& !_main->isHidden()
+		&& !_main->animatingShow()
+		&& !_layer
+		&& !isHidden()
+		&& !isMinimized()
+		&& windowHandle()->isExposed()
+		&& (AutoScrollInactiveChat.value()
+			|| (isActive() && !_main->session().updates().isIdle()));
 }
 
-void MainWindow::checkHistoryActivation() {
+void MainWindow::checkActivation() {
 	updateIsActive();
 	if (_main) {
-		_main->checkHistoryActivation();
+		_main->checkActivation();
 	}
 }
 
 bool MainWindow::contentOverlapped(const QRect &globalRect) {
-	if (_main && _main->contentOverlapped(globalRect)) return true;
-	if (_layer && _layer->contentOverlapped(globalRect)) return true;
-	return false;
+	return (_main && _main->contentOverlapped(globalRect))
+		|| (_layer && _layer->contentOverlapped(globalRect));
 }
 
 void MainWindow::setInnerFocus() {
@@ -575,13 +557,20 @@ bool MainWindow::eventFilter(QObject *object, QEvent *e) {
 			FeedLangTestingKey(key);
 		}
 #ifdef _DEBUG
-		switch (static_cast<QKeyEvent*>(e)->key()) {
-		case Qt::Key_F3:
-			anim::SetSlowMultiplier((anim::SlowMultiplier() == 10) ? 1 : 10);
-			return true;
-		case Qt::Key_F4:
-			anim::SetSlowMultiplier((anim::SlowMultiplier() == 50) ? 1 : 50);
-			return true;
+		if (static_cast<QKeyEvent*>(e)->modifiers().testFlag(
+				Qt::ControlModifier)) {
+			switch (static_cast<QKeyEvent*>(e)->key()) {
+			case Qt::Key_F11:
+				anim::SetSlowMultiplier((anim::SlowMultiplier() == 10)
+					? 1
+					: 10);
+				return true;
+			case Qt::Key_F12:
+				anim::SetSlowMultiplier((anim::SlowMultiplier() == 50)
+					? 1
+					: 50);
+				return true;
+			}
 		}
 #endif
 	} break;
@@ -645,22 +634,25 @@ void MainWindow::closeEvent(QCloseEvent *e) {
 	if (Core::Sandbox::Instance().isSavingSession() || Core::Quitting()) {
 		e->accept();
 		Core::Quit();
-	} else {
-		e->ignore();
-		const auto hasAuth = [&] {
-			if (!Core::App().domain().started()) {
-				return false;
-			}
-			for (const auto &[_, account] : Core::App().domain().accounts()) {
-				if (account->sessionExists()) {
-					return true;
-				}
-			}
+		return;
+	} else if (Core::App().closeNonLastAsync(&controller())) {
+		e->accept();
+		return;
+	}
+	e->ignore();
+	const auto hasAuth = [&] {
+		if (!Core::App().domain().started()) {
 			return false;
-		}();
-		if (!hasAuth || !hideNoQuit()) {
-			Core::Quit();
 		}
+		for (const auto &[_, account] : Core::App().domain().accounts()) {
+			if (account->sessionExists()) {
+				return true;
+			}
+		}
+		return false;
+	}();
+	if (!hasAuth || !hideNoQuit()) {
+		Core::Quit();
 	}
 }
 
@@ -703,20 +695,4 @@ void MainWindow::sendPaths() {
 	}
 }
 
-void MainWindow::activeChangedHook() {
-	if (const auto controller = sessionController()) {
-		controller->session().updates().updateOnline();
-	}
-}
-
 MainWindow::~MainWindow() = default;
-
-namespace App {
-
-MainWindow *wnd() {
-	return (Core::IsAppLaunched() && Core::App().primaryWindow())
-		? Core::App().primaryWindow()->widget().get()
-		: nullptr;
-}
-
-} // namespace App

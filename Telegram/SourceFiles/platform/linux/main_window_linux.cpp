@@ -27,14 +27,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/window_session_controller.h"
 #include "base/platform/base_platform_info.h"
 #include "base/event_filter.h"
+#include "ui/platform/ui_platform_window_title.h"
 #include "ui/widgets/popup_menu.h"
-#include "ui/widgets/input_fields.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/ui_utility.h"
-
-#ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
-#include "base/platform/linux/base_linux_glibmm_helper.h"
-#include "base/platform/linux/base_linux_dbus_utilities.h"
-#endif // !DESKTOP_APP_DISABLE_DBUS_INTEGRATION
 
 #ifndef DESKTOP_APP_DISABLE_X11_INTEGRATION
 #include "base/platform/linux/base_linux_xcb_utilities.h"
@@ -44,14 +40,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <QtCore/QMimeData>
 #include <QtGui/QWindow>
 #include <QtWidgets/QMenuBar>
+#include <QtWidgets/QLineEdit>
+#include <QtWidgets/QTextEdit>
 
-#include <private/qguiapplication_p.h>
-#include <private/qaction_p.h>
-
-#ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
-#include <glibmm.h>
-#include <giomm.h>
-#endif // !DESKTOP_APP_DISABLE_DBUS_INTEGRATION
+#include <gio/gio.hpp>
 
 namespace Platform {
 namespace {
@@ -114,42 +106,47 @@ void XCBSetDesktopFileName(QWindow *window) {
 		return;
 	}
 
-	const auto desktopFileAtom = base::Platform::XCB::GetAtom(
-		connection,
-		"_KDE_NET_WM_DESKTOP_FILE");
-
 	const auto utf8Atom = base::Platform::XCB::GetAtom(
 		connection,
 		"UTF8_STRING");
 
-	if (!desktopFileAtom.has_value() || !utf8Atom.has_value()) {
+	if (!utf8Atom.has_value()) {
 		return;
 	}
 
-	const auto filename = QGuiApplication::desktopFileName()
-		.chopped(8)
-		.toUtf8();
+	const auto filenameAtoms = {
+		base::Platform::XCB::GetAtom(connection, "_GTK_APPLICATION_ID"),
+		base::Platform::XCB::GetAtom(connection, "_KDE_NET_WM_DESKTOP_FILE"),
+	};
 
-	xcb_change_property(
-		connection,
-		XCB_PROP_MODE_REPLACE,
-		window->winId(),
-		*desktopFileAtom,
-		*utf8Atom,
-		8,
-		filename.size(),
-		filename.data());
+	const auto filename = QGuiApplication::desktopFileName().toUtf8();
+
+	for (const auto atom : filenameAtoms) {
+		if (atom.has_value()) {
+			xcb_change_property(
+				connection,
+				XCB_PROP_MODE_REPLACE,
+				window->winId(),
+				*atom,
+				*utf8Atom,
+				8,
+				filename.size(),
+				filename.data());
+		}
+	}
 }
 #endif // !DESKTOP_APP_DISABLE_X11_INTEGRATION
 
 void SkipTaskbar(QWindow *window, bool skip) {
 	if (const auto integration = WaylandIntegration::Instance()) {
 		integration->skipTaskbar(window, skip);
+		return;
 	}
 
 #ifndef DESKTOP_APP_DISABLE_X11_INTEGRATION
 	if (IsX11()) {
 		XCBSkipTaskbar(window, skip);
+		return;
 	}
 #endif // !DESKTOP_APP_DISABLE_X11_INTEGRATION
 }
@@ -157,17 +154,14 @@ void SkipTaskbar(QWindow *window, bool skip) {
 void SendKeySequence(
 	Qt::Key key,
 	Qt::KeyboardModifiers modifiers = Qt::NoModifier) {
-	const auto focused = QApplication::focusWidget();
+	const auto focused = static_cast<QObject*>(QApplication::focusWidget());
 	if (qobject_cast<QLineEdit*>(focused)
 		|| qobject_cast<QTextEdit*>(focused)
 		|| dynamic_cast<HistoryInner*>(focused)) {
-		QApplication::postEvent(
-			focused,
-			new QKeyEvent(QEvent::KeyPress, key, modifiers));
-
-		QApplication::postEvent(
-			focused,
-			new QKeyEvent(QEvent::KeyRelease, key, modifiers));
+		QKeyEvent pressEvent(QEvent::KeyPress, key, modifiers);
+		focused->event(&pressEvent);
+		QKeyEvent releaseEvent(QEvent::KeyRelease, key, modifiers);
+		focused->event(&releaseEvent);
 	}
 }
 
@@ -176,41 +170,8 @@ void ForceDisabled(QAction *action, bool disabled) {
 		if (disabled) action->setDisabled(true);
 	} else if (!disabled) {
 		action->setDisabled(false);
-
-		const auto privateAction = QActionPrivate::get(action);
-		privateAction->setShortcutEnabled(
-			false,
-			QGuiApplicationPrivate::instance()->shortcutMap);
 	}
 }
-
-#ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
-bool UseUnityCounter() {
-	static const auto Result = [&] {
-		try {
-			const auto connection = Gio::DBus::Connection::get_sync(
-				Gio::DBus::BusType::BUS_TYPE_SESSION);
-
-			return base::Platform::DBus::NameHasOwner(
-				connection,
-				"com.canonical.Unity");
-		} catch (...) {
-		}
-
-		return false;
-	}();
-
-	return Result;
-}
-
-uint djbStringHash(const std::string &string) {
-	uint hash = 5381;
-	for (const auto &curChar : string) {
-		hash = (hash << 5) + hash + curChar;
-	}
-	return hash;
-}
-#endif // !DESKTOP_APP_DISABLE_DBUS_INTEGRATION
 
 } // namespace
 
@@ -219,6 +180,12 @@ MainWindow::MainWindow(not_null<Window::Controller*> controller)
 }
 
 void MainWindow::initHook() {
+	events() | rpl::start_with_next([=](not_null<QEvent*> e) {
+		if (e->type() == QEvent::ThemeChange) {
+			updateWindowIcon();
+		}
+	}, lifetime());
+
 	base::install_event_filter(windowHandle(), [=](not_null<QEvent*> e) {
 		if (e->type() == QEvent::Expose) {
 			auto ee = static_cast<QExposeEvent*>(e.get());
@@ -240,24 +207,9 @@ void MainWindow::initHook() {
 		return base::EventFilterResult::Continue;
 	});
 
-#ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
-	if (UseUnityCounter()) {
-		LOG(("Using Unity launcher counter."));
-	} else {
-		LOG(("Not using Unity launcher counter."));
-	}
-#endif // !DESKTOP_APP_DISABLE_DBUS_INTEGRATION
-
 #ifndef DESKTOP_APP_DISABLE_X11_INTEGRATION
 	XCBSetDesktopFileName(windowHandle());
 #endif // !DESKTOP_APP_DISABLE_X11_INTEGRATION
-
-	LOG(("System tray available: %1").arg(Logs::b(TrayIconSupported())));
-}
-
-bool MainWindow::isActiveForTrayMenu() {
-	updateIsActive();
-	return Platform::IsWayland() ? isVisible() : isActive();
 }
 
 void MainWindow::workmodeUpdated(Core::Settings::WorkMode mode) {
@@ -269,51 +221,61 @@ void MainWindow::workmodeUpdated(Core::Settings::WorkMode mode) {
 }
 
 void MainWindow::unreadCounterChangedHook() {
-	updateIconCounters();
+	updateUnityCounter();
 }
 
-void MainWindow::updateIconCounters() {
-	updateWindowIcon();
+void MainWindow::updateWindowIcon() {
+	const auto session = sessionController()
+		? &sessionController()->session()
+		: nullptr;
+	setWindowIcon(Window::CreateIcon(session));
+}
 
-#ifndef DESKTOP_APP_DISABLE_DBUS_INTEGRATION
-	if (UseUnityCounter()) {
-		const auto launcherUrl = Glib::ustring(
-			"application://"
-				+ QGuiApplication::desktopFileName().toStdString());
-		const auto counterSlice = std::min(Core::App().unreadBadge(), 9999);
-		std::map<Glib::ustring, Glib::VariantBase> dbusUnityProperties;
+void MainWindow::updateUnityCounter() {
+#if QT_VERSION >= QT_VERSION_CHECK(6, 6, 0)
+	qApp->setBadgeNumber(Core::App().unreadBadge());
+#else // Qt >= 6.6.0
+	using namespace gi::repository;
 
-		if (counterSlice > 0) {
-			// According to the spec, it should be of 'x' D-Bus signature,
-			// which corresponds to gint64 type with glib
-			// https://wiki.ubuntu.com/Unity/LauncherAPI#Low_level_DBus_API:_com.canonical.Unity.LauncherEntry
-			dbusUnityProperties["count"] = Glib::Variant<gint64>::create(
-				counterSlice);
-			dbusUnityProperties["count-visible"] =
-				Glib::Variant<bool>::create(true);
-		} else {
-			dbusUnityProperties["count-visible"] =
-				Glib::Variant<bool>::create(false);
+	static const auto djbStringHash = [](const std::string &string) {
+		uint hash = 5381;
+		for (const auto &curChar : string) {
+			hash = (hash << 5) + hash + curChar;
 		}
+		return hash;
+	};
 
-		try {
-			const auto connection = Gio::DBus::Connection::get_sync(
-				Gio::DBus::BusType::BUS_TYPE_SESSION);
+	const auto launcherUrl = "application://"
+		+ QGuiApplication::desktopFileName().toStdString()
+		+ ".desktop";
 
-			connection->emit_signal(
-				"/com/canonical/unity/launcherentry/"
-					+ std::to_string(djbStringHash(launcherUrl)),
-				"com.canonical.Unity.LauncherEntry",
-				"Update",
-				{},
-				base::Platform::MakeGlibVariant(std::tuple{
-					launcherUrl,
-					dbusUnityProperties,
-				}));
-		} catch (...) {
-		}
+	const auto counterSlice = std::min(Core::App().unreadBadge(), 9999);
+
+	auto connection = Gio::bus_get_sync(Gio::BusType::SESSION_, nullptr);
+	if (!connection) {
+		return;
 	}
-#endif // !DESKTOP_APP_DISABLE_DBUS_INTEGRATION
+
+	connection.emit_signal(
+		{},
+		"/com/canonical/unity/launcherentry/"
+			+ std::to_string(djbStringHash(launcherUrl)),
+		"com.canonical.Unity.LauncherEntry",
+		"Update",
+		GLib::Variant::new_tuple({
+			GLib::Variant::new_string(launcherUrl),
+			GLib::Variant::new_array({
+				GLib::Variant::new_dict_entry(
+					GLib::Variant::new_string("count"),
+					GLib::Variant::new_variant(
+						GLib::Variant::new_int64(counterSlice))),
+				GLib::Variant::new_dict_entry(
+					GLib::Variant::new_string("count-visible"),
+					GLib::Variant::new_variant(
+						GLib::Variant::new_boolean(counterSlice))),
+			}),
+		}));
+#endif // Qt < 6.6.0
 }
 
 void MainWindow::createGlobalMenu() {
@@ -337,7 +299,7 @@ void MainWindow::createGlobalMenu() {
 		});
 
 	auto quit = file->addAction(
-		tr::lng_mac_menu_quit_telegram(tr::now, lt_telegram, qsl("Telegram")),
+		tr::lng_mac_menu_quit_telegram(tr::now, lt_telegram, u"Telegram"_q),
 		this,
 		[=] { quitFromTray(); },
 		QKeySequence::Quit);
@@ -407,6 +369,15 @@ void MainWindow::createGlobalMenu() {
 				Qt::ControlModifier | Qt::ShiftModifier);
 		},
 		Ui::kStrikeOutSequence);
+
+	psBlockquote = edit->addAction(
+		tr::lng_menu_formatting_blockquote(tr::now),
+		[] {
+			SendKeySequence(
+				Qt::Key_Period,
+				Qt::ControlModifier | Qt::ShiftModifier);
+		},
+		Ui::kBlockquoteSequence);
 
 	psMonospace = edit->addAction(
 		tr::lng_menu_formatting_monospace(tr::now),
@@ -498,24 +469,13 @@ void MainWindow::createGlobalMenu() {
 		tr::lng_mac_menu_about_telegram(
 			tr::now,
 			lt_telegram,
-			qsl("Telegram")),
+			u"Telegram"_q),
 		[=] {
 			ensureWindowShown();
 			controller().show(Box<AboutBox>());
 		});
 
 	about->setMenuRole(QAction::AboutQtRole);
-
-	// avoid shadowing actual shortcuts by the menubar
-	for (const auto &child : psMainMenu->children()) {
-		const auto action = qobject_cast<QAction*>(child);
-		if (action) {
-			const auto privateAction = QActionPrivate::get(action);
-			privateAction->setShortcutEnabled(
-				false,
-				QGuiApplicationPrivate::instance()->shortcutMap);
-		}
-	}
 
 	updateGlobalMenu();
 }
@@ -561,7 +521,8 @@ void MainWindow::updateGlobalMenuHook() {
 	updateIsActive();
 	const auto logged = (sessionController() != nullptr);
 	const auto inactive = !logged || controller().locked();
-	const auto support = logged && account().session().supportMode();
+	const auto support = logged
+		&& sessionController()->session().supportMode();
 	ForceDisabled(psLogout, !logged && !Core::App().passcodeLocked());
 	ForceDisabled(psUndo, !canUndo);
 	ForceDisabled(psRedo, !canRedo);
@@ -579,6 +540,7 @@ void MainWindow::updateGlobalMenuHook() {
 	ForceDisabled(psItalic, !markdownEnabled);
 	ForceDisabled(psUnderline, !markdownEnabled);
 	ForceDisabled(psStrikeOut, !markdownEnabled);
+	ForceDisabled(psBlockquote, !markdownEnabled);
 	ForceDisabled(psMonospace, !markdownEnabled);
 	ForceDisabled(psClearFormat, !markdownEnabled);
 }
@@ -589,7 +551,9 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *evt) {
 		if (qobject_cast<QLineEdit*>(obj)
 			|| qobject_cast<QTextEdit*>(obj)
 			|| dynamic_cast<HistoryInner*>(obj)) {
-			updateGlobalMenu();
+			if (QApplication::focusWidget()) {
+				updateGlobalMenu();
+			}
 		}
 	}
 	return Window::MainWindow::eventFilter(obj, evt);

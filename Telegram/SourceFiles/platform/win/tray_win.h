@@ -19,7 +19,7 @@ namespace Ui {
 class PopupMenu;
 } // namespace Ui
 
-class QSystemTrayIcon;
+class QPlatformSystemTrayIcon;
 
 namespace Platform {
 
@@ -31,6 +31,8 @@ public:
 	[[nodiscard]] rpl::producer<> showFromTrayRequests() const;
 	[[nodiscard]] rpl::producer<> hideToTrayRequests() const;
 	[[nodiscard]] rpl::producer<> iconClicks() const;
+
+	[[nodiscard]] bool hasIcon() const;
 
 	void createIcon();
 	void destroyIcon();
@@ -55,10 +57,12 @@ public:
 	[[nodiscard]] static QPixmap IconWithCounter(
 		Window::CounterLayerArgs &&args,
 		bool smallIcon,
+		bool monochrome,
 		bool supportMode);
+	[[nodiscard]] static QString QuitJumpListIconPath();
 
 private:
-	base::unique_qptr<QSystemTrayIcon> _icon;
+	base::unique_qptr<QPlatformSystemTrayIcon> _icon;
 	base::unique_qptr<Ui::PopupMenu> _menu;
 
 	rpl::event_stream<> _iconClicks;
@@ -69,5 +73,7 @@ private:
 	rpl::lifetime _lifetime;
 
 };
+
+void RefreshTaskbarThemeValue();
 
 } // namespace Platform

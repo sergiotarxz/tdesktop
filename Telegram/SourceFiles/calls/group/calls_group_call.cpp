@@ -15,7 +15,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "lang/lang_keys.h"
 #include "lang/lang_hardcoded.h"
 #include "boxes/peers/edit_participants_box.h" // SubscribeToMigration.
-#include "ui/toasts/common_toasts.h"
+#include "ui/toast/toast.h"
 #include "base/unixtime.h"
 #include "core/application.h"
 #include "core/core_settings.h"
@@ -29,8 +29,8 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/global_shortcuts.h"
 #include "base/random.h"
 #include "webrtc/webrtc_video_track.h"
-#include "webrtc/webrtc_media_devices.h"
 #include "webrtc/webrtc_create_adm.h"
+#include "webrtc/webrtc_environment.h"
 
 #include <tgcalls/group/GroupInstanceCustomImpl.h>
 #include <tgcalls/VideoCaptureInterface.h>
@@ -51,14 +51,6 @@ constexpr auto kFixManualLargeVideoDuration = 5 * crl::time(1000);
 constexpr auto kFixSpeakingLargeVideoDuration = 3 * crl::time(1000);
 constexpr auto kFullAsMediumsCount = 4; // 1 Full is like 4 Mediums.
 constexpr auto kMaxMediumQualities = 16; // 4 Fulls or 16 Mediums.
-
-[[nodiscard]] std::unique_ptr<Webrtc::MediaDevices> CreateMediaDevices() {
-	const auto &settings = Core::App().settings();
-	return Webrtc::CreateMediaDevices(
-		settings.callInputDeviceId(),
-		settings.callOutputDeviceId(),
-		settings.callVideoInputDeviceId());
-}
 
 [[nodiscard]] const Data::GroupCallParticipant *LookupParticipant(
 		not_null<PeerData*> peer,
@@ -590,12 +582,27 @@ GroupCall::GroupCall(
 , _scheduleDate(info.scheduleDate)
 , _lastSpokeCheckTimer([=] { checkLastSpoke(); })
 , _checkJoinedTimer([=] { checkJoined(); })
+, _playbackDeviceId(
+	&Core::App().mediaDevices(),
+	Webrtc::DeviceType::Playback,
+	Webrtc::DeviceIdValueWithFallback(
+		Core::App().settings().callPlaybackDeviceIdValue(),
+		Core::App().settings().playbackDeviceIdValue()))
+, _captureDeviceId(
+	&Core::App().mediaDevices(),
+	Webrtc::DeviceType::Capture,
+	Webrtc::DeviceIdValueWithFallback(
+		Core::App().settings().callCaptureDeviceIdValue(),
+		Core::App().settings().captureDeviceIdValue()))
+, _cameraDeviceId(
+	&Core::App().mediaDevices(),
+	Webrtc::DeviceType::Camera,
+	Webrtc::DeviceIdOrDefault(Core::App().settings().cameraDeviceIdValue()))
 , _pushToTalkCancelTimer([=] { pushToTalkCancel(); })
 , _connectingSoundTimer([=] { playConnectingSoundOnce(); })
 , _listenersHidden(info.rtmp)
 , _rtmp(info.rtmp)
-, _rtmpVolume(Group::kDefaultVolume)
-, _mediaDevices(CreateMediaDevices()) {
+, _rtmpVolume(Group::kDefaultVolume) {
 	_muted.value(
 	) | rpl::combine_previous(
 	) | rpl::start_with_next([=](MuteState previous, MuteState state) {
@@ -661,6 +668,9 @@ GroupCall::GroupCall(
 GroupCall::~GroupCall() {
 	destroyScreencast();
 	destroyController();
+	if (!_rtmp) {
+		Core::App().mediaDevices().setCaptureMuteTracker(this, false);
+	}
 }
 
 bool GroupCall::isSharingScreen() const {
@@ -1413,11 +1423,9 @@ void GroupCall::rejoin(not_null<PeerData*> as) {
 				}
 
 				hangup();
-				Ui::ShowMultilineToast({
-					.text = { type == u"GROUPCALL_FORBIDDEN"_q
-						? tr::lng_group_not_accessible(tr::now)
-						: Lang::Hard::ServerError() },
-				});
+				Ui::Toast::Show((type == u"GROUPCALL_FORBIDDEN"_q)
+					? tr::lng_group_not_accessible(tr::now)
+					: Lang::Hard::ServerError());
 			}).send();
 		});
 	});
@@ -2060,29 +2068,57 @@ void GroupCall::applyOtherParticipantUpdate(
 }
 
 void GroupCall::setupMediaDevices() {
-	_mediaDevices->audioInputId(
-	) | rpl::start_with_next([=](QString id) {
-		_audioInputId = id;
-		if (_instance) {
-			_instance->setAudioInputDevice(id.toStdString());
-		}
+	_playbackDeviceId.changes() | rpl::filter([=] {
+		return _instance && _setDeviceIdCallback;
+	}) | rpl::start_with_next([=](const Webrtc::DeviceResolvedId &deviceId) {
+		_setDeviceIdCallback(deviceId);
+
+		// Value doesn't matter here, just trigger reading of the new value.
+		_instance->setAudioOutputDevice(deviceId.value.toStdString());
 	}, _lifetime);
 
-	_mediaDevices->audioOutputId(
-	) | rpl::start_with_next([=](QString id) {
-		_audioOutputId = id;
-		if (_instance) {
-			_instance->setAudioOutputDevice(id.toStdString());
-		}
+	_captureDeviceId.changes() | rpl::filter([=] {
+		return _instance && _setDeviceIdCallback;
+	}) | rpl::start_with_next([=](const Webrtc::DeviceResolvedId &deviceId) {
+		_setDeviceIdCallback(deviceId);
+
+		// Value doesn't matter here, just trigger reading of the new value.
+		_instance->setAudioInputDevice(deviceId.value.toStdString());
 	}, _lifetime);
 
-	_mediaDevices->videoInputId(
-	) | rpl::start_with_next([=](QString id) {
-		_cameraInputId = id;
-		if (_cameraCapture) {
-			_cameraCapture->switchToDevice(id.toStdString(), false);
-		}
+	_cameraDeviceId.changes() | rpl::filter([=] {
+		return _cameraCapture != nullptr;
+	}) | rpl::start_with_next([=](const Webrtc::DeviceResolvedId &deviceId) {
+		_cameraCapture->switchToDevice(deviceId.value.toStdString(), false);
 	}, _lifetime);
+
+	if (!_rtmp) {
+		_muted.value() | rpl::start_with_next([=](MuteState state) {
+			const auto devices = &Core::App().mediaDevices();
+			const auto muted = (state != MuteState::Active)
+				&& (state != MuteState::PushToTalk);
+			const auto track = !muted || (state == MuteState::Muted);
+			devices->setCaptureMuteTracker(this, track);
+			devices->setCaptureMuted(muted);
+		}, _lifetime);
+	}
+}
+
+void GroupCall::captureMuteChanged(bool mute) {
+	const auto oldState = muted();
+	if (mute
+		&& (oldState == MuteState::ForceMuted
+			|| oldState == MuteState::RaisedHand
+			|| oldState == MuteState::Muted)) {
+		return;
+	} else if (!mute && oldState != MuteState::Muted) {
+		return;
+	}
+	setMutedAndUpdate(mute ? MuteState::Muted : MuteState::Active);
+}
+
+rpl::producer<Webrtc::DeviceResolvedId> GroupCall::captureMuteDeviceId() {
+	return _captureDeviceId.value();
 }
 
 int GroupCall::activeVideoSendersCount() const {
@@ -2119,7 +2155,7 @@ bool GroupCall::emitShareCameraError() {
 		return emitError(Error::DisabledNoCamera);
 	} else if (mutedByAdmin()) {
 		return emitError(Error::MutedNoCamera);
-	} else if (Webrtc::GetVideoInputList().empty()) {
+	} else if (_cameraDeviceId.current().value.isEmpty()) {
 		return emitError(Error::NoCamera);
 	}
 	return false;
@@ -2128,7 +2164,7 @@ bool GroupCall::emitShareCameraError() {
 void GroupCall::emitShareCameraError(Error error) {
 	_cameraState = Webrtc::VideoState::Inactive;
 	if (error == Error::CameraFailed
-		&& Webrtc::GetVideoInputList().empty()) {
+		&& _cameraDeviceId.current().value.isEmpty()) {
 		error = Error::NoCamera;
 	}
 	_errors.fire_copy(error);
@@ -2182,7 +2218,7 @@ void GroupCall::setupOutgoingVideo() {
 				return;
 			} else if (!_cameraCapture) {
 				_cameraCapture = _delegate->groupCallGetVideoCapture(
-					_cameraInputId);
+					_cameraDeviceId.current().value);
 				if (!_cameraCapture) {
 					return emitShareCameraError(Error::CameraFailed);
 				}
@@ -2194,7 +2230,7 @@ void GroupCall::setupOutgoingVideo() {
 				});
 			} else {
 				_cameraCapture->switchToDevice(
-					_cameraInputId.toStdString(),
+					_cameraDeviceId.current().value.toStdString(),
 					false);
 			}
 			if (_instance) {
@@ -2340,6 +2376,32 @@ bool GroupCall::tryCreateController() {
 
 	const auto weak = base::make_weak(&_instanceGuard);
 	const auto myLevel = std::make_shared<tgcalls::GroupLevelValue>();
+	const auto playbackDeviceIdInitial = _playbackDeviceId.current();
+	const auto captureDeviceIdInitial = _captureDeviceId.current();
+	const auto saveSetDeviceIdCallback = [=](
+			Fn<void(Webrtc::DeviceResolvedId)> setDeviceIdCallback) {
+		setDeviceIdCallback(playbackDeviceIdInitial);
+		setDeviceIdCallback(captureDeviceIdInitial);
+		crl::on_main(weak, [=] {
+			_setDeviceIdCallback = std::move(setDeviceIdCallback);
+			const auto playback = _playbackDeviceId.current();
+			if (_instance && playback != playbackDeviceIdInitial) {
+				_setDeviceIdCallback(playback);
+
+				// Value doesn't matter here, just trigger reading of the...
+				_instance->setAudioOutputDevice(
+					playback.value.toStdString());
+			}
+			const auto capture = _captureDeviceId.current();
+			if (_instance && capture != captureDeviceIdInitial) {
+				_setDeviceIdCallback(capture);
+
+				// Value doesn't matter here, just trigger reading of the...
+				_instance->setAudioInputDevice(capture.value.toStdString());
+			}
+		});
+	};
+
 	tgcalls::GroupInstanceDescriptor descriptor = {
 		.threads = tgcalls::StaticThreads::getThreads(),
 		.config = tgcalls::GroupConfig{
@@ -2362,10 +2424,10 @@ bool GroupCall::tryCreateController() {
 			}
 			crl::on_main(weak, [=] { audioLevelsUpdated(data); });
 		},
-		.initialInputDeviceId = _audioInputId.toStdString(),
-		.initialOutputDeviceId = _audioOutputId.toStdString(),
+		.initialInputDeviceId = captureDeviceIdInitial.value.toStdString(),
+		.initialOutputDeviceId = playbackDeviceIdInitial.value.toStdString(),
 		.createAudioDeviceModule = Webrtc::AudioDeviceModuleCreator(
-			settings.callAudioBackend()),
+			saveSetDeviceIdCallback),
 		.videoCapture = _cameraCapture,
 		.requestCurrentTime = [=, call = base::make_weak(this)](
 				std::function<void(int64_t)> done) {
@@ -2427,8 +2489,8 @@ bool GroupCall::tryCreateController() {
 		},
 	};
 	if (Logs::DebugEnabled()) {
-		auto callLogFolder = cWorkingDir() + qsl("DebugLogs");
-		auto callLogPath = callLogFolder + qsl("/last_group_call_log.txt");
+		auto callLogFolder = cWorkingDir() + u"DebugLogs"_q;
+		auto callLogPath = callLogFolder + u"/last_group_call_log.txt"_q;
 		auto callLogNative = QDir::toNativeSeparators(callLogPath);
 		descriptor.config.need_log = true;
 #ifdef Q_OS_WIN
@@ -2515,7 +2577,7 @@ void GroupCall::broadcastPartStart(std::shared_ptr<LoadPartTask> task) {
 				: (videoQuality == Quality::Medium)
 				? 1
 				: 0)),
-		MTP_int(0),
+		MTP_long(0),
 		MTP_int(128 * 1024)
 	)).done([=](
 			const MTPupload_File &result,
@@ -3015,7 +3077,7 @@ void GroupCall::checkLastSpoke() {
 	const auto now = crl::now();
 	auto list = base::take(_lastSpoke);
 	for (auto i = list.begin(); i != list.end();) {
-		const auto [ssrc, when] = *i;
+		const auto &[ssrc, when] = *i;
 		if (when.anything + kKeepInListFor >= now) {
 			hasRecent = true;
 			++i;
@@ -3292,14 +3354,6 @@ void GroupCall::requestVideoQuality(
 	updateRequestedVideoChannelsDelayed();
 }
 
-void GroupCall::setCurrentAudioDevice(bool input, const QString &deviceId) {
-	if (input) {
-		_mediaDevices->switchToAudioInput(deviceId);
-	} else {
-		_mediaDevices->switchToAudioOutput(deviceId);
-	}
-}
-
 void GroupCall::toggleMute(const Group::MuteRequest &data) {
 	if (_rtmp) {
 		_rtmpVolume = data.mute ? 0 : Group::kDefaultVolume;
@@ -3482,6 +3536,7 @@ void GroupCall::destroyController() {
 		DEBUG_LOG(("Call Info: Destroying call controller.."));
 		invalidate_weak_ptrs(&_instanceGuard);
 
+		_instance->stop();
 		crl::async([
 			instance = base::take(_instance),
 			done = _delegate->groupCallAddAsyncWaiter()
@@ -3497,6 +3552,8 @@ void GroupCall::destroyScreencast() {
 	if (_screenInstance) {
 		DEBUG_LOG(("Call Info: Destroying call screen controller.."));
 		invalidate_weak_ptrs(&_screenInstanceGuard);
+
+		_screenInstance->stop();
 		crl::async([
 			instance = base::take(_screenInstance),
 			done = _delegate->groupCallAddAsyncWaiter()

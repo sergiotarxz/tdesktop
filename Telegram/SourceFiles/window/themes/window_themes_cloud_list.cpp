@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/toast/toast.h"
 #include "ui/style/style_palette_colorizer.h"
 #include "ui/boxes/confirm_box.h"
+#include "ui/painter.h"
 #include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "core/application.h"
@@ -53,7 +54,7 @@ constexpr auto kShowPerRow = 4;
 		return source;
 	}
 	const auto from = source.size();
-	const auto to = st::settingsThemePreviewSize * cIntRetinaFactor();
+	const auto to = st::settingsThemePreviewSize * style::DevicePixelRatio();
 	if (to.width() * from.height() > to.height() * from.width()) {
 		const auto small = (from.width() > to.width())
 			? source.scaledToWidth(to.width(), Qt::SmoothTransformation)
@@ -129,7 +130,7 @@ CloudListColors ColorsFromScheme(const EmbeddedScheme &scheme) {
 	result.radiobuttonActive = scheme.radiobuttonActive;
 	result.radiobuttonInactive = scheme.radiobuttonInactive;
 	result.background = QImage(
-		QSize(1, 1) * cIntRetinaFactor(),
+		QSize(1, 1) * style::DevicePixelRatio(),
 		QImage::Format_ARGB32_Premultiplied);
 	result.background.fill(scheme.background);
 	return result;
@@ -159,7 +160,8 @@ CloudListCheck::CloudListCheck(bool checked)
 void CloudListCheck::setColors(const Colors &colors) {
 	_colors = colors;
 	if (!_colors->background.isNull()) {
-		const auto size = st::settingsThemePreviewSize * cIntRetinaFactor();
+		const auto size = st::settingsThemePreviewSize
+			* style::DevicePixelRatio();
 		_backgroundFull = (_colors->background.size() == size)
 			? _colors->background
 			: _colors->background.scaled(
@@ -182,8 +184,8 @@ void CloudListCheck::ensureContrast() {
 		- radio.height()
 		- st::settingsThemeRadioBottom;
 	const auto under = QRect(
-		QPoint(x, y) * cIntRetinaFactor(),
-		radio * cIntRetinaFactor());
+		QPoint(x, y) * style::DevicePixelRatio(),
+		radio * style::DevicePixelRatio());
 	const auto image = _backgroundFull.copy(under).convertToFormat(
 		QImage::Format_ARGB32_Premultiplied);
 	const auto active = style::internal::EnsureContrast(
@@ -206,7 +208,7 @@ void CloudListCheck::validateBackgroundCache(int width) {
 		return;
 	}
 	_backgroundCacheWidth = width;
-	const auto imageWidth = width * cIntRetinaFactor();
+	const auto imageWidth = width * style::DevicePixelRatio();
 	_backgroundCache = (width == st::settingsThemePreviewSize.width())
 		? _backgroundFull
 		: _backgroundFull.copy(
@@ -217,10 +219,10 @@ void CloudListCheck::validateBackgroundCache(int width) {
 	_backgroundCache = Images::Round(
 		std::move(_backgroundCache),
 		ImageRoundRadius::Large);
-	_backgroundCache.setDevicePixelRatio(cRetinaFactor());
+	_backgroundCache.setDevicePixelRatio(style::DevicePixelRatio());
 }
 
-void CloudListCheck::paint(Painter &p, int left, int top, int outerWidth) {
+void CloudListCheck::paint(QPainter &p, int left, int top, int outerWidth) {
 	if (!_colors) {
 		return;
 	} else if (_colors->background.isNull()) {
@@ -231,7 +233,7 @@ void CloudListCheck::paint(Painter &p, int left, int top, int outerWidth) {
 }
 
 void CloudListCheck::paintNotSupported(
-		Painter &p,
+		QPainter &p,
 		int left,
 		int top,
 		int outerWidth) {
@@ -241,13 +243,13 @@ void CloudListCheck::paintNotSupported(
 
 	const auto height = st::settingsThemePreviewSize.height();
 	const auto rect = QRect(0, 0, outerWidth, height);
-	const auto radius = st::historyMessageRadius;
+	const auto radius = st::roundRadiusLarge;
 	p.drawRoundedRect(rect, radius, radius);
 	st::settingsThemeNotSupportedIcon.paintInCenter(p, rect);
 }
 
 void CloudListCheck::paintWithColors(
-		Painter &p,
+		QPainter &p,
 		int left,
 		int top,
 		int outerWidth) {
@@ -497,7 +499,7 @@ bool CloudList::insertTillLimit(
 void CloudList::insert(int index, const Data::CloudTheme &theme) {
 	const auto id = theme.id;
 	const auto value = groupValueForId(id);
-	const auto checked = _group->hasValue() && (_group->value() == value);
+	const auto checked = _group->hasValue() && (_group->current() == value);
 	auto check = std::make_unique<CloudListCheck>(checked);
 	const auto raw = check.get();
 	auto button = std::make_unique<Ui::Radiobutton>(
@@ -592,7 +594,8 @@ void CloudList::showMenu(Element &element) {
 		_contextMenu->addAction(tr::lng_theme_share(tr::now), [=] {
 			QGuiApplication::clipboard()->setText(
 				_window->session().createInternalLinkFull("addtheme/" + slug));
-			Ui::Toast::Show(tr::lng_background_link_copied(tr::now));
+			_window->window().showToast(
+				tr::lng_background_link_copied(tr::now));
 		}, &st::menuIconShare);
 	}
 	if (cloud.documentId

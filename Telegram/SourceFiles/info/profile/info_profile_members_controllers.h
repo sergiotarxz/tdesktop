@@ -8,6 +8,9 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #pragma once
 
 #include "boxes/peer_list_controllers.h"
+#include "ui/unread_badge.h"
+
+class ParticipantsBoxController;
 
 namespace Window {
 class SessionNavigation;
@@ -25,7 +28,6 @@ public:
 	};
 	struct Type {
 		Rights rights;
-		bool canRemove = false;
 		QString adminRank;
 	};
 
@@ -34,32 +36,16 @@ public:
 	void setType(Type type);
 	bool rightActionDisabled() const override;
 	QMargins rightActionMargins() const override;
-	QSize rightActionSize() const override;
-	void rightActionPaint(
-		Painter &p,
-		int x,
-		int y,
-		int outerWidth,
-		bool selected,
-		bool actionSelected) override;
-	int nameIconWidth() const override;
-	void paintNameIcon(
-		Painter &p,
-		int x,
-		int y,
-		int outerWidth,
-		bool selected) override;
 	void refreshStatus() override;
 
 	not_null<UserData*> user() const;
 
 private:
-	[[nodiscard]] bool canRemove() const;
 	Type _type;
 
 };
 
-std::unique_ptr<PeerListController> CreateMembersController(
+std::unique_ptr<ParticipantsBoxController> CreateMembersController(
 	not_null<Window::SessionNavigation*> navigation,
 	not_null<PeerData*> peer);
 

@@ -57,6 +57,13 @@ public:
 	void checkSendNextAfterSuccess(MTP::DcId dcId);
 	[[nodiscard]] int chooseSessionIndex(MTP::DcId dcId) const;
 
+	void notifyNonPremiumDelay(DocumentId id) {
+		_nonPremiumDelays.fire_copy(id);
+	}
+	[[nodiscard]] rpl::producer<DocumentId> nonPremiumDelays() const {
+		return _nonPremiumDelays.events();
+	}
+
 private:
 	class Queue final {
 	public:
@@ -109,6 +116,7 @@ private:
 	const not_null<ApiWrap*> _api;
 
 	rpl::event_stream<> _taskFinished;
+	rpl::event_stream<DocumentId> _nonPremiumDelays;
 
 	base::flat_map<MTP::DcId, DcBalanceData> _balanceData;
 	base::Timer _resetGenerationTimer;
@@ -127,7 +135,8 @@ public:
 		std::variant<
 			StorageFileLocation,
 			WebFileLocation,
-			GeoPointLocation> data;
+			GeoPointLocation,
+			AudioAlbumThumbLocation> data;
 	};
 
 	DownloadMtprotoTask(
@@ -156,9 +165,9 @@ public:
 
 protected:
 	[[nodiscard]] bool haveSentRequests() const;
-	[[nodiscard]] bool haveSentRequestForOffset(int offset) const;
+	[[nodiscard]] bool haveSentRequestForOffset(int64 offset) const;
 	void cancelAllRequests();
-	void cancelRequestForOffset(int offset);
+	void cancelRequestForOffset(int64 offset);
 
 	void addToQueue(int priority = 0);
 	void removeFromQueue();
@@ -169,7 +178,7 @@ protected:
 
 private:
 	struct RequestData {
-		int offset = 0;
+		int64 offset = 0;
 		mutable int sessionIndex = 0;
 		int requestedInSession = 0;
 		crl::time sent = 0;
@@ -196,9 +205,9 @@ private:
 	};
 
 	// Called only if readyToRequest() == true.
-	[[nodiscard]] virtual int takeNextRequestOffset() = 0;
-	virtual bool feedPart(int offset, const QByteArray &bytes) = 0;
-	virtual bool setWebFileSizeHook(int size);
+	[[nodiscard]] virtual int64 takeNextRequestOffset() = 0;
+	virtual bool feedPart(int64 offset, const QByteArray &bytes) = 0;
+	virtual bool setWebFileSizeHook(int64 size);
 	virtual void cancelOnFail() = 0;
 
 	void cancelRequest(mtpRequestId requestId);
@@ -220,7 +229,7 @@ private:
 		const MTPVector<MTPFileHash> &result,
 		mtpRequestId requestId);
 
-	void partLoaded(int offset, const QByteArray &bytes);
+	void partLoaded(int64 offset, const QByteArray &bytes);
 
 	bool partFailed(const MTP::Error &error, mtpRequestId requestId);
 	bool normalPartFailed(
@@ -249,8 +258,10 @@ private:
 		const QVector<MTPFileHash> &hashes);
 
 	[[nodiscard]] CheckCdnHashResult checkCdnFileHash(
-		int offset,
+		int64 offset,
 		bytes::const_span buffer);
+
+	void subscribeToNonPremiumLimit();
 
 	const not_null<DownloadManagerMtproto*> _owner;
 	const MTP::DcId _dcId = 0;
@@ -260,15 +271,17 @@ private:
 	const Data::FileOrigin _origin;
 
 	base::flat_map<mtpRequestId, RequestData> _sentRequests;
-	base::flat_map<int, mtpRequestId> _requestByOffset;
+	base::flat_map<int64, mtpRequestId> _requestByOffset;
 
 	MTP::DcId _cdnDcId = 0;
 	QByteArray _cdnToken;
 	QByteArray _cdnEncryptionKey;
 	QByteArray _cdnEncryptionIV;
-	base::flat_map<int, CdnFileHash> _cdnFileHashes;
+	base::flat_map<int64, CdnFileHash> _cdnFileHashes;
 	base::flat_map<RequestData, QByteArray> _cdnUncheckedParts;
 	mtpRequestId _cdnHashesRequestId = 0;
+
+	rpl::lifetime _nonPremiumLimitSubscription;
 
 };
 

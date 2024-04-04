@@ -59,7 +59,9 @@ private:
 	QPointer<Ui::BoxContent> showBox(object_ptr<Ui::BoxContent> box) const;
 
 	void addInviteLinkButton();
-	bool inviteSelectedUsers(not_null<PeerListBox*> box) const;
+	void inviteSelectedUsers(
+		not_null<PeerListBox*> box,
+		Fn<void()> done) const;
 	void subscribeToMigration();
 	int alreadyInCount() const;
 	bool isAlreadyIn(not_null<UserData*> user) const;
@@ -70,6 +72,23 @@ private:
 	base::flat_set<not_null<UserData*>> _alreadyIn;
 
 };
+
+struct ForbiddenInvites {
+	std::vector<not_null<UserData*>> users;
+	std::vector<not_null<UserData*>> premiumAllowsInvite;
+	std::vector<not_null<UserData*>> premiumAllowsWrite;
+
+	[[nodiscard]] bool empty() const {
+		return users.empty();
+	}
+};
+[[nodiscard]] ForbiddenInvites CollectForbiddenUsers(
+	not_null<Main::Session*> session,
+	const MTPmessages_InvitedUsers &result);
+bool ChatInviteForbidden(
+	std::shared_ptr<Ui::Show> show,
+	not_null<PeerData*> peer,
+	ForbiddenInvites forbidden);
 
 // Adding an admin, banned or restricted user from channel members
 // with search + contacts search + global search.

@@ -28,7 +28,7 @@ class Painter;
 
 [[nodiscard]] QString FilterChatsTypeName(Data::ChatFilter::Flag flag);
 void PaintFilterChatsTypeIcon(
-	Painter &p,
+	QPainter &p,
 	Data::ChatFilter::Flag flag,
 	int x,
 	int y,
@@ -49,7 +49,9 @@ public:
 		rpl::producer<QString> title,
 		Flags options,
 		Flags selected,
-		const base::flat_set<not_null<History*>> &peers);
+		const base::flat_set<not_null<History*>> &peers,
+		int limit,
+		Fn<void()> showLimitReached);
 
 	[[nodiscard]] Main::Session &session() const override;
 	[[nodiscard]] Flags chosenOptions() const {
@@ -62,6 +64,7 @@ public:
 	bool handleDeselectForeignRow(PeerListRowId itemId) override;
 
 private:
+	int selectedTypesCount() const;
 	void prepareViewHook() override;
 	std::unique_ptr<Row> createRow(not_null<History*> history) override;
 	[[nodiscard]] object_ptr<Ui::RpWidget> prepareTypesList();
@@ -69,12 +72,17 @@ private:
 	void updateTitle();
 
 	const not_null<Main::Session*> _session;
+	const Fn<void()> _showLimitReached;
 	rpl::producer<QString> _title;
 	base::flat_set<not_null<History*>> _peers;
 	Flags _options;
 	Flags _selected;
+	int _limit = 0;
+	bool _chatlist = false;
 
 	Fn<void(PeerListRowId)> _deselectOption;
+
+	PeerListContentDelegate *_typesDelegate = nullptr;
 
 	rpl::lifetime _lifetime;
 

@@ -12,6 +12,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/bytes.h"
 #include "mtproto/sender.h"
 #include "mtproto/mtproto_auth_key.h"
+#include "webrtc/webrtc_device_resolver.h"
 
 namespace Media {
 namespace Audio {
@@ -58,7 +59,9 @@ enum class CallType {
 	Outgoing,
 };
 
-class Call : public base::has_weak_ptr {
+class Call final
+	: public base::has_weak_ptr
+	, private Webrtc::CaptureMuteTracker {
 public:
 	class Delegate {
 	public:
@@ -126,6 +129,7 @@ public:
 		WaitingIncoming,
 		Ringing,
 		Busy,
+		WaitingUserConfirmation,
 	};
 	[[nodiscard]] State state() const {
 		return _state.current();
@@ -158,6 +162,18 @@ public:
 		return _remoteVideoState.value();
 	}
 
+	enum class RemoteBatteryState {
+		Low,
+		Normal,
+	};
+	[[nodiscard]] RemoteBatteryState remoteBatteryState() const {
+		return _remoteBatteryState.current();
+	}
+	[[nodiscard]] auto remoteBatteryStateValue() const
+	-> rpl::producer<RemoteBatteryState> {
+		return _remoteBatteryState.value();
+	}
+
 	static constexpr auto kSignalBarStarting = -1;
 	static constexpr auto kSignalBarFinished = -2;
 	static constexpr auto kSignalBarCount = 4;
@@ -179,6 +195,7 @@ public:
 	crl::time getDurationMs() const;
 	float64 getWaitingSoundPeakValue() const;
 
+	void applyUserConfirmation();
 	void answer();
 	void hangup();
 	void redial();
@@ -188,11 +205,9 @@ public:
 
 	QString getDebugLog() const;
 
-	void setCurrentAudioDevice(bool input, const QString &deviceId);
 	//void setAudioVolume(bool input, float level);
 	void setAudioDuckingEnabled(bool enabled);
 
-	void setCurrentCameraDevice(const QString &deviceId);
 	[[nodiscard]] QString videoDeviceId() const {
 		return _videoCaptureDeviceId;
 	}
@@ -248,6 +263,10 @@ private:
 	void setSignalBarCount(int count);
 	void destroyController();
 
+	void captureMuteChanged(bool mute) override;
+	rpl::producer<Webrtc::DeviceResolvedId> captureMuteDeviceId() override;
+
+	void setupMediaDevices();
 	void setupOutgoingVideo();
 	void updateRemoteMediaState(
 		tgcalls::AudioState audio,
@@ -261,6 +280,8 @@ private:
 	rpl::variable<RemoteAudioState> _remoteAudioState =
 		RemoteAudioState::Active;
 	rpl::variable<Webrtc::VideoState> _remoteVideoState;
+	rpl::variable<RemoteBatteryState> _remoteBatteryState =
+		RemoteBatteryState::Normal;
 	rpl::event_stream<Error> _errors;
 	FinishType _finishAfterRequestingCall = FinishType::None;
 	bool _answerAfterDhConfigReceived = false;
@@ -268,6 +289,11 @@ private:
 	crl::time _startTime = 0;
 	base::DelayedCallTimer _finishByTimeoutTimer;
 	base::Timer _discardByTimeoutTimer;
+
+	Fn<void(Webrtc::DeviceResolvedId)> _setDeviceIdCallback;
+	Webrtc::DeviceResolver _playbackDeviceId;
+	Webrtc::DeviceResolver _captureDeviceId;
+	Webrtc::DeviceResolver _cameraDeviceId;
 
 	rpl::variable<bool> _muted = false;
 
@@ -291,6 +317,7 @@ private:
 
 	std::unique_ptr<Media::Audio::Track> _waitingTrack;
 
+	rpl::lifetime _instanceLifetime;
 	rpl::lifetime _lifetime;
 
 };

@@ -7,7 +7,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #pragma once
 
-#include "boxes/abstract_box.h"
+#include "ui/layers/box_content.h"
 #include "base/unique_qptr.h"
 #include "data/data_chat_participant_status.h"
 
@@ -114,7 +114,6 @@ private:
 		not_null<Ui::VerticalLayout*> container,
 		bool isGroup);
 
-	const Ui::BoxShow _show;
 	const ChatAdminRightsInfo _oldRights;
 	const QString _oldRank;
 	Fn<void(
@@ -168,7 +167,6 @@ private:
 	void createUntilVariants();
 	TimeId getRealUntilValue() const;
 
-	const Ui::BoxShow _show;
 	const ChatRestrictionsInfo _oldRights;
 	TimeId _until = 0;
 	Fn<void(ChatRestrictionsInfo, ChatRestrictionsInfo)> _saveCallback;

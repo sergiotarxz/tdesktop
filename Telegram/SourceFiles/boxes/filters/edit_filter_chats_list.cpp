@@ -7,23 +7,29 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "boxes/filters/edit_filter_chats_list.h"
 
+#include "data/data_premium_limits.h"
 #include "history/history.h"
 #include "window/window_session_controller.h"
 #include "lang/lang_keys.h"
 #include "ui/widgets/labels.h"
 #include "ui/wrap/vertical_layout.h"
+#include "ui/painter.h"
+#include "main/main_app_config.h"
+#include "main/main_account.h"
+#include "main/main_session.h"
 #include "base/object_ptr.h"
+#include "data/data_user.h"
 #include "styles/style_window.h"
 #include "styles/style_boxes.h"
 
 namespace {
 
-constexpr auto kMaxExceptions = 100;
-
 using Flag = Data::ChatFilter::Flag;
 using Flags = Data::ChatFilter::Flags;
 
 constexpr auto kAllTypes = {
+	Flag::NewChats,
+	Flag::ExistingChats,
 	Flag::Contacts,
 	Flag::NonContacts,
 	Flag::Groups,
@@ -45,7 +51,8 @@ public:
 
 	QString generateName() override;
 	QString generateShortName() override;
-	PaintRoundImageCallback generatePaintUserpicCallback() override;
+	PaintRoundImageCallback generatePaintUserpicCallback(
+		bool forceRound) override;
 
 private:
 	[[nodiscard]] Flag flag() const;
@@ -58,7 +65,8 @@ public:
 
 	QString generateName() override;
 	QString generateShortName() override;
-	PaintRoundImageCallback generatePaintUserpicCallback() override;
+	PaintRoundImageCallback generatePaintUserpicCallback(
+		bool forceRound) override;
 
 };
 
@@ -104,15 +112,16 @@ QString TypeRow::generateShortName() {
 	return generateName();
 }
 
-PaintRoundImageCallback TypeRow::generatePaintUserpicCallback() {
+PaintRoundImageCallback TypeRow::generatePaintUserpicCallback(
+		bool forceRound) {
 	const auto flag = this->flag();
-	return [=](Painter &p, int x, int y, int outerWidth, int size) {
+	return [=](QPainter &p, int x, int y, int outerWidth, int size) {
 		PaintFilterChatsTypeIcon(p, flag, x, y, outerWidth, size);
 	};
 }
 
 Flag TypeRow::flag() const {
-	return static_cast<Flag>(id() & 0xFF);
+	return static_cast<Flag>(id() & 0xFFFF);
 }
 
 ExceptionRow::ExceptionRow(not_null<History*> history) : Row(history) {
@@ -133,11 +142,15 @@ QString ExceptionRow::generateShortName() {
 	return generateName();
 }
 
-PaintRoundImageCallback ExceptionRow::generatePaintUserpicCallback() {
+PaintRoundImageCallback ExceptionRow::generatePaintUserpicCallback(
+		bool forceRound) {
 	const auto peer = this->peer();
 	const auto saved = peer->isSelf();
 	const auto replies = peer->isRepliesChat();
-	auto userpic = saved ? nullptr : ensureUserpicView();
+	auto userpic = saved ? Ui::PeerUserpicView() : ensureUserpicView();
+	if (forceRound && peer->isForum()) {
+		return ForceRoundUserpicCallback(peer);
+	}
 	return [=](Painter &p, int x, int y, int outerWidth, int size) mutable {
 		if (saved) {
 			Ui::EmptyUserpic::PaintSavedMessages(p, x, y, outerWidth, size);
@@ -208,6 +221,8 @@ auto TypeController::rowSelectionChanges() const
 
 [[nodiscard]] QString FilterChatsTypeName(Flag flag) {
 	switch (flag) {
+	case Flag::NewChats: return tr::lng_filters_type_new(tr::now);
+	case Flag::ExistingChats: return tr::lng_filters_type_existing(tr::now);
 	case Flag::Contacts: return tr::lng_filters_type_contacts(tr::now);
 	case Flag::NonContacts:
 		return tr::lng_filters_type_non_contacts(tr::now);
@@ -222,14 +237,16 @@ auto TypeController::rowSelectionChanges() const
 }
 
 void PaintFilterChatsTypeIcon(
-		Painter &p,
+		QPainter &p,
 		Data::ChatFilter::Flag flag,
 		int x,
 		int y,
 		int outerWidth,
 		int size) {
-	const auto &color = [&]() -> const style::color& {
+	const auto &color1 = [&]() -> const style::color& {
 		switch (flag) {
+		case Flag::NewChats: return st::historyPeer5UserpicBg;
+		case Flag::ExistingChats: return st::historyPeer8UserpicBg;
 		case Flag::Contacts: return st::historyPeer4UserpicBg;
 		case Flag::NonContacts: return st::historyPeer7UserpicBg;
 		case Flag::Groups: return st::historyPeer2UserpicBg;
@@ -241,8 +258,25 @@ void PaintFilterChatsTypeIcon(
 		}
 		Unexpected("Flag in color paintFlagIcon.");
 	}();
+	const auto &color2 = [&]() -> const style::color& {
+		switch (flag) {
+		case Flag::NewChats: return st::historyPeer5UserpicBg2;
+		case Flag::ExistingChats: return st::historyPeer8UserpicBg2;
+		case Flag::Contacts: return st::historyPeer4UserpicBg2;
+		case Flag::NonContacts: return st::historyPeer7UserpicBg2;
+		case Flag::Groups: return st::historyPeer2UserpicBg2;
+		case Flag::Channels: return st::historyPeer1UserpicBg2;
+		case Flag::Bots: return st::historyPeer6UserpicBg2;
+		case Flag::NoMuted: return st::historyPeer6UserpicBg2;
+		case Flag::NoArchived: return st::historyPeer4UserpicBg2;
+		case Flag::NoRead: return st::historyPeer7UserpicBg2;
+		}
+		Unexpected("Flag in color paintFlagIcon.");
+	}();
 	const auto &icon = [&]() -> const style::icon& {
 		switch (flag) {
+		case Flag::NewChats: return st::windowFilterTypeNewChats;
+		case Flag::ExistingChats: return st::windowFilterTypeExistingChats;
 		case Flag::Contacts: return st::windowFilterTypeContacts;
 		case Flag::NonContacts: return st::windowFilterTypeNonContacts;
 		case Flag::Groups: return st::windowFilterTypeGroups;
@@ -256,7 +290,9 @@ void PaintFilterChatsTypeIcon(
 	}();
 	const auto rect = style::rtlrect(x, y, size, size, outerWidth);
 	auto hq = PainterHighQualityEnabler(p);
-	p.setBrush(color->b);
+	auto bg = QLinearGradient(x, y, x, y + size);
+	bg.setStops({ { 0., color1->c }, { 1., color2->c } });
+	p.setBrush(bg);
 	p.setPen(Qt::NoPen);
 	p.drawEllipse(rect);
 	icon.paintInCenter(p, rect);
@@ -267,7 +303,7 @@ object_ptr<Ui::RpWidget> CreatePeerListSectionSubtitle(
 		rpl::producer<QString> text) {
 	auto result = object_ptr<Ui::FixedHeightWidget>(
 		parent,
-		st::searchedBarHeight);
+		st::windowFilterChatsSectionSubtitleHeight);
 
 	const auto raw = result.data();
 	raw->paintRequest(
@@ -296,24 +332,47 @@ EditFilterChatsListController::EditFilterChatsListController(
 	rpl::producer<QString> title,
 	Flags options,
 	Flags selected,
-	const base::flat_set<not_null<History*>> &peers)
+	const base::flat_set<not_null<History*>> &peers,
+	int limit,
+	Fn<void()> showLimitReached)
 : ChatsListBoxController(session)
 , _session(session)
+, _showLimitReached(std::move(showLimitReached))
 , _title(std::move(title))
 , _peers(peers)
-, _options(options)
-, _selected(selected) {
+, _options(options & ~Flag::Chatlist)
+, _selected(selected)
+, _limit(limit)
+, _chatlist(options & Flag::Chatlist) {
 }
 
 Main::Session &EditFilterChatsListController::session() const {
 	return *_session;
 }
 
+int EditFilterChatsListController::selectedTypesCount() const {
+	Expects(_chatlist || !_options || _typesDelegate != nullptr);
+
+	if (_chatlist || !_options) {
+		return 0;
+	}
+	auto result = 0;
+	for (auto i = 0; i != _typesDelegate->peerListFullRowsCount(); ++i) {
+		if (_typesDelegate->peerListRowAt(i)->checked()) {
+			++result;
+		}
+	}
+	return result;
+}
+
 void EditFilterChatsListController::rowClicked(not_null<PeerListRow*> row) {
-	const auto count = delegate()->peerListSelectedRowsCount();
-	if (count < kMaxExceptions || row->checked()) {
+	const auto count = delegate()->peerListSelectedRowsCount()
+		- selectedTypesCount();
+	if (count < _limit || row->checked()) {
 		delegate()->peerListSetRowChecked(row, !row->checked());
 		updateTitle();
+	} else if (const auto copy = _showLimitReached) {
+		copy();
 	}
 }
 
@@ -337,7 +396,9 @@ bool EditFilterChatsListController::handleDeselectForeignRow(
 
 void EditFilterChatsListController::prepareViewHook() {
 	delegate()->peerListSetTitle(std::move(_title));
-	delegate()->peerListSetAboveWidget(prepareTypesList());
+	if (!_chatlist && _options) {
+		delegate()->peerListSetAboveWidget(prepareTypesList());
+	}
 
 	const auto count = int(_peers.size());
 	const auto rows = std::make_unique<std::optional<ExceptionRow>[]>(count);
@@ -363,7 +424,7 @@ object_ptr<Ui::RpWidget> EditFilterChatsListController::prepareTypesList() {
 	container->add(object_ptr<Ui::FixedHeightWidget>(
 		container,
 		st::membersMarginTop));
-	const auto delegate = container->lifetime().make_state<
+	_typesDelegate = container->lifetime().make_state<
 		PeerListContentDelegateSimple
 	>();
 	const auto controller = container->lifetime().make_state<TypeController>(
@@ -374,11 +435,11 @@ object_ptr<Ui::RpWidget> EditFilterChatsListController::prepareTypesList() {
 	const auto content = result->add(object_ptr<PeerListContent>(
 		container,
 		controller));
-	delegate->setContent(content);
-	controller->setDelegate(delegate);
+	_typesDelegate->setContent(content);
+	controller->setDelegate(_typesDelegate);
 	for (const auto flag : kAllTypes) {
 		if (_selected & flag) {
-			if (const auto row = delegate->peerListFindRow(TypeId(flag))) {
+			if (const auto row = _typesDelegate->peerListFindRow(TypeId(flag))) {
 				content->changeCheckState(row, true, anim::type::instant);
 				this->delegate()->peerListSetForeignRowChecked(
 					row,
@@ -408,8 +469,8 @@ object_ptr<Ui::RpWidget> EditFilterChatsListController::prepareTypesList() {
 	}, _lifetime);
 
 	_deselectOption = [=](PeerListRowId itemId) {
-		if (const auto row = delegate->peerListFindRow(itemId)) {
-			delegate->peerListSetRowChecked(row, false);
+		if (const auto row = _typesDelegate->peerListFindRow(itemId)) {
+			_typesDelegate->peerListSetRowChecked(row, false);
 		}
 	};
 
@@ -418,19 +479,19 @@ object_ptr<Ui::RpWidget> EditFilterChatsListController::prepareTypesList() {
 
 auto EditFilterChatsListController::createRow(not_null<History*> history)
 -> std::unique_ptr<Row> {
+	const auto business = (_options & (Flag::NewChats | Flag::ExistingChats))
+		|| (!_options && !_chatlist);
+	if (business && (history->peer->isSelf() || !history->peer->isUser())) {
+		return nullptr;
+	}
 	return history->inChatList()
 		? std::make_unique<ExceptionRow>(history)
 		: nullptr;
 }
 
 void EditFilterChatsListController::updateTitle() {
-	auto types = 0;
-	for (const auto flag : kAllTypes) {
-		if (_selected & flag) {
-			++types;
-		}
-	}
-	const auto count = delegate()->peerListSelectedRowsCount() - types;
-	const auto additional = qsl("%1 / %2").arg(count).arg(kMaxExceptions);
+	const auto count = delegate()->peerListSelectedRowsCount()
+		- selectedTypesCount();
+	const auto additional = u"%1 / %2"_q.arg(count).arg(_limit);
 	delegate()->peerListSetAdditionalTitle(rpl::single(additional));
 }

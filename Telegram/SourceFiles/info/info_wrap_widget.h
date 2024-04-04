@@ -15,11 +15,12 @@ enum class SharedMediaType : signed char;
 } // namespace Storage
 
 namespace Ui {
-class SettingsSlider;
 class FadeShadow;
 class PlainShadow;
 class PopupMenu;
 class IconButton;
+class RoundRect;
+struct StringWithNumbers;
 } // namespace Ui
 
 namespace Window {
@@ -57,14 +58,14 @@ struct SelectedItem {
 	GlobalMsgId globalId;
 	bool canDelete = false;
 	bool canForward = false;
+	bool canToggleStoryPin = false;
 };
 
 struct SelectedItems {
-	explicit SelectedItems(Storage::SharedMediaType type)
-	: type(type) {
-	}
+	SelectedItems() = default;
+	explicit SelectedItems(Storage::SharedMediaType type);
 
-	Storage::SharedMediaType type;
+	Fn<Ui::StringWithNumbers(int)> title;
 	std::vector<SelectedItem> list;
 };
 
@@ -72,6 +73,7 @@ enum class SelectionAction {
 	Clear,
 	Forward,
 	Delete,
+	ToggleStoryPin,
 };
 
 class WrapWidget final : public Window::SectionWidget {
@@ -111,8 +113,6 @@ public:
 
 	rpl::producer<int> desiredHeightValue() const override;
 
-	void updateInternalState(not_null<Memento*> memento);
-
 	// Float player interface.
 	bool floatPlayerHandleWheelEvent(QEvent *e) override;
 	QRect floatPlayerAvailableRect() override;
@@ -124,10 +124,17 @@ public:
 	void updateGeometry(
 		QRect newGeometry,
 		bool expanding,
-		int additionalScroll);
+		int additionalScroll,
+		int maxVisibleHeight);
+	[[nodiscard]] int scrollBottomSkip() const;
 	[[nodiscard]] int scrollTillBottom(int forHeight) const;
 	[[nodiscard]] rpl::producer<int> scrollTillBottomChanges() const;
 	[[nodiscard]] rpl::producer<bool> grabbingForExpanding() const;
+	[[nodiscard]] const Ui::RoundRect *bottomSkipRounding() const;
+
+	[[nodiscard]] rpl::producer<> removeRequests() const override {
+		return _removeRequests.events();
+	}
 
 	~WrapWidget();
 
@@ -144,11 +151,6 @@ protected:
 private:
 	using SlideDirection = Window::SlideDirection;
 	using SectionSlideParams = Window::SectionSlideParams;
-	//enum class Tab {
-	//	Profile,
-	//	Media,
-	//	None,
-	//};
 	struct StackItem;
 
 	void startInjectingActivePeerProfiles();
@@ -170,12 +172,14 @@ private:
 		not_null<ContentMemento*> memento,
 		const Window::SectionShow &params);
 	void setupTop();
-	//void setupTabbedTop();
-	//void setupTabs(Tab tab);
-	//void createTabs();
+	void setupTopBarMenuToggle();
 	void createTopBar();
 	void highlightTopBar();
 	void setupShortcuts();
+
+	[[nodiscard]] bool hasBackButton() const;
+	[[nodiscard]] bool willHaveBackButton(
+		const Window::SectionShow &params) const;
 
 	not_null<RpWidget*> topWidget() const;
 
@@ -185,16 +189,13 @@ private:
 	rpl::producer<bool> topShadowToggledValue() const;
 	void updateContentGeometry();
 
-	//void showTab(Tab tab);
 	void showContent(object_ptr<ContentWidget> content);
-	//std::shared_ptr<ContentMemento> createTabMemento(Tab tab);
 	object_ptr<ContentWidget> createContent(
 		not_null<ContentMemento*> memento,
 		not_null<Controller*> controller);
 	std::unique_ptr<Controller> createController(
 		not_null<Window::SessionController*> window,
 		not_null<ContentMemento*> memento);
-	//void convertProfileFromStackToTab();
 
 	rpl::producer<SelectedItems> selectedListValue() const;
 	bool requireTopBarSearch() const;
@@ -202,31 +203,30 @@ private:
 	void addTopBarMenuButton();
 	void addProfileCallsButton();
 	void showTopBarMenu(bool check);
-	void deleteAllDownloads();
 
 	rpl::variable<Wrap> _wrap;
 	std::unique_ptr<Controller> _controller;
 	object_ptr<ContentWidget> _content = { nullptr };
 	int _additionalScroll = 0;
+	int _maxVisibleHeight = 0;
 	bool _expanding = false;
 	rpl::variable<bool> _grabbingForExpanding = false;
-	//object_ptr<Ui::PlainShadow> _topTabsBackground = { nullptr };
-	//object_ptr<Ui::SettingsSlider> _topTabs = { nullptr };
 	object_ptr<TopBar> _topBar = { nullptr };
 	object_ptr<Ui::RpWidget> _topBarSurrogate = { nullptr };
 	Ui::Animations::Simple _topBarOverrideAnimation;
 	bool _topBarOverrideShown = false;
 
 	object_ptr<Ui::FadeShadow> _topShadow;
+	object_ptr<Ui::FadeShadow> _bottomShadow;
 	base::unique_qptr<Ui::IconButton> _topBarMenuToggle;
 	base::unique_qptr<Ui::PopupMenu> _topBarMenu;
 
-//	Tab _tab = Tab::Profile;
-//	std::shared_ptr<ContentMemento> _anotherTabMemento;
 	std::vector<StackItem> _historyStack;
+	rpl::event_stream<> _removeRequests;
 
 	rpl::event_stream<rpl::producer<int>> _desiredHeights;
 	rpl::event_stream<rpl::producer<bool>> _desiredShadowVisibilities;
+	rpl::event_stream<rpl::producer<bool>> _desiredBottomShadowVisibilities;
 	rpl::event_stream<rpl::producer<SelectedItems>> _selectedLists;
 	rpl::event_stream<rpl::producer<int>> _scrollTillBottomChanges;
 	rpl::event_stream<> _contentChanges;

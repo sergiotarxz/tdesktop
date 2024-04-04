@@ -54,17 +54,18 @@ int64_t File::Context::Seek(void *opaque, int64_t offset, int whence) {
 }
 
 int File::Context::read(bytes::span buffer) {
-	Assert(_size >= _offset);
-	const auto amount = std::min(std::size_t(_size - _offset), buffer.size());
+	Expects(_size >= _offset);
+
+	const auto amount = std::min(_size - _offset, int64(buffer.size()));
 
 	if (unroll()) {
-		return -1;
+		return AVERROR_EXTERNAL;
 	} else if (amount > kMaxSingleReadAmount) {
 		LOG(("Streaming Error: Read callback asked for too much data: %1"
 			).arg(amount));
-		return -1;
+		return AVERROR_EXTERNAL;
 	} else if (!amount) {
-		return amount;
+		return AVERROR_EOF;
 	}
 
 	buffer = buffer.subspan(0, amount);
@@ -86,10 +87,10 @@ int File::Context::read(bytes::span buffer) {
 		}
 		_semaphore.acquire();
 		if (_interrupted) {
-			return -1;
+			return AVERROR_EXTERNAL;
 		} else if (const auto error = _reader->streamingError()) {
 			fail(*error);
-			return -1;
+			return AVERROR_EXTERNAL;
 		}
 	}
 
@@ -102,7 +103,7 @@ int File::Context::read(bytes::span buffer) {
 int64_t File::Context::seek(int64_t offset, int whence) {
 	const auto checkedSeek = [&](int64_t offset) {
 		if (_failed || offset < 0 || offset > _size) {
-			return -1;
+			return int64(-1);
 		}
 		return (_offset = offset);
 	};
@@ -149,7 +150,7 @@ Stream File::Context::initStream(
 		not_null<AVFormatContext*> format,
 		AVMediaType type,
 		Mode mode,
-		bool hwAllowed) {
+		StartOptions options) {
 	auto result = Stream();
 	const auto index = result.index = av_find_best_stream(
 		format,
@@ -170,13 +171,14 @@ Stream File::Context::initStream(
 		}
 		result.codec = FFmpeg::MakeCodecPointer({
 			.stream = info,
-			.hwAllowed = hwAllowed,
+			.hwAllowed = options.hwAllow,
 		});
 		if (!result.codec) {
 			return result;
 		}
 		result.rotation = FFmpeg::ReadRotationFromMetadata(info);
-		result.aspect = FFmpeg::ValidateAspectRatio(info->sample_aspect_ratio);
+		result.aspect = FFmpeg::ValidateAspectRatio(
+			info->sample_aspect_ratio);
 	} else if (type == AVMEDIA_TYPE_AUDIO) {
 		result.frequency = info->codecpar->sample_rate;
 		if (!result.frequency) {
@@ -194,7 +196,9 @@ Stream File::Context::initStream(
 		return result;
 	}
 	result.timeBase = info->time_base;
-	result.duration = (info->duration != AV_NOPTS_VALUE)
+	result.duration = options.durationOverride
+		? options.durationOverride
+		: (info->duration != AV_NOPTS_VALUE)
 		? FFmpeg::PtsToTime(info->duration, result.timeBase)
 		: UnreliableFormatDuration(format, info, mode)
 		? kTimeUnknown
@@ -267,17 +271,19 @@ std::variant<FFmpeg::Packet, FFmpeg::AvErrorWrap> File::Context::readPacket() {
 	return error;
 }
 
-void File::Context::start(crl::time position, bool hwAllow) {
+void File::Context::start(StartOptions options) {
+	Expects(options.seekable || !options.position);
+
 	auto error = FFmpeg::AvErrorWrap();
 
 	if (unroll()) {
 		return;
 	}
 	auto format = FFmpeg::MakeFormatPointer(
-		static_cast<void *>(this),
+		static_cast<void*>(this),
 		&Context::Read,
 		nullptr,
-		&Context::Seek);
+		options.seekable ? &Context::Seek : nullptr);
 	if (!format) {
 		return fail(Error::OpenFailed);
 	}
@@ -287,12 +293,20 @@ void File::Context::start(crl::time position, bool hwAllow) {
 	}
 
 	const auto mode = _delegate->fileOpenMode();
-	auto video = initStream(format.get(), AVMEDIA_TYPE_VIDEO, mode, hwAllow);
+	auto video = initStream(
+		format.get(),
+		AVMEDIA_TYPE_VIDEO,
+		mode,
+		options);
 	if (unroll()) {
 		return;
 	}
 
-	auto audio = initStream(format.get(), AVMEDIA_TYPE_AUDIO, mode, false);
+	auto audio = initStream(
+		format.get(),
+		AVMEDIA_TYPE_AUDIO,
+		mode,
+		options);
 	if (unroll()) {
 		return;
 	}
@@ -301,8 +315,11 @@ void File::Context::start(crl::time position, bool hwAllow) {
 	if (_reader->isRemoteLoader()) {
 		sendFullInCache(true);
 	}
-	if (video.codec || audio.codec) {
-		seekToPosition(format.get(), video.codec ? video : audio, position);
+	if (options.seekable && (video.codec || audio.codec)) {
+		seekToPosition(
+			format.get(),
+			video.codec ? video : audio,
+			options.position);
 	}
 	if (unroll()) {
 		return;
@@ -432,10 +449,7 @@ File::File(std::shared_ptr<Reader> reader)
 : _reader(std::move(reader)) {
 }
 
-void File::start(
-		not_null<FileDelegate*> delegate,
-		crl::time position,
-		bool hwAllow) {
+void File::start(not_null<FileDelegate*> delegate, StartOptions options) {
 	stop(true);
 
 	_reader->startStreaming();
@@ -443,7 +457,7 @@ void File::start(
 
 	_thread = std::thread([=, context = &*_context] {
 		crl::toggle_fp_exceptions(true);
-		context->start(position, hwAllow);
+		context->start(options);
 		while (!context->finished()) {
 			context->readNextPacket();
 		}
