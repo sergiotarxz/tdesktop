@@ -1126,6 +1126,10 @@ void ApiWrap::requestFullPeer(not_null<PeerData*> peer) {
 		return;
 	}
 
+        if (const auto encrypted = peer->asEncrypted()) {
+                return;
+        }
+
 	const auto requestId = [&] {
 		const auto failHandler = [=](const MTP::Error &error) {
 			_fullPeerRequests.remove(peer);

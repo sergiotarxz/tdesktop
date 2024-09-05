@@ -1471,15 +1471,21 @@ Ui::MultiSlideTracker DetailsFiller::fillUserButtons(
 			_controller->wrapValue(),
 			std::move(activePeerValue),
 			(_1 != Wrap::Side) || (_2 != user));
-		auto sendMessage = [window, user] {
-			Secret::Secret *secret = new Secret::Secret(user, true);
-			secret->getDiffieHellman([secret] {
-				Secret::insertPendingSecret(&secret->peer->session(), secret);
-				secret->sendEncryptedRequest();
+		auto sendMessage = [&, user, window] {
+                        auto dateBeforeSecretCreation = base::unixtime::now();
+			Secret::Secret *secret = new Secret::Secret(&(user->session()), true, [dateBeforeSecretCreation, window, user](gsl::not_null<PeerData*> gotPeer) {
+                            if (base::unixtime::now() - dateBeforeSecretCreation < 2) {
+                                window->showPeerHistory(gotPeer->id);
+                                return;
+                            }
+                            printf("UI expired before we could open the secret chat in the window.\n");
+                        });
+                        secret->realUser = user;
+			secret->getDiffieHellman([&, user, secret] {
+                            Main::Session &mainSession = user->session();
+                            Secret::insertPendingSecret(mainSession, secret);
+                            secret->sendEncryptedRequest();
 			});
-//			window->showPeerHistory(
-//				user,
-//				Window::SectionShow::Way::Forward);
 		};
 		AddMainButton(
 			_wrap,
@@ -1505,8 +1511,8 @@ Ui::MultiSlideTracker DetailsFiller::fillUserButtons(
 			std::move(tracker).atLeastOneShownValue()
 		);
 	} else {
-		addSendMessageButton();
-        addStartSecretChatButton();
+            addSendMessageButton();
+            addStartSecretChatButton();
 	}
 
 	addReportReaction(tracker);

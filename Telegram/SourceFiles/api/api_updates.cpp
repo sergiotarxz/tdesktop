@@ -1999,7 +1999,7 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 
 	case mtpc_updateNewEncryptedMessage: {
 		auto &updateNewEncryptedMessage = update.c_updateNewEncryptedMessage();
-		Secret::handleUpdateNewEncryptedMessage(&session(), updateNewEncryptedMessage);
+		Secret::handleUpdateNewEncryptedMessage(session(), updateNewEncryptedMessage);
 	} break;
 
 	case mtpc_updateEncryptedChatTyping: {
@@ -2009,7 +2009,10 @@ void Updates::feedUpdate(const MTPUpdate &update) {
 	} break;
 
 	case mtpc_updateEncryption: {
-		Secret::handleUpdateEncryption(&session(), update);
+		Secret::handleUpdateEncryption(session(), update, [this](gsl::not_null<PeerData*> peerData) {
+                    auto secret = session().data().secretHash[peerData->id.value];
+                    secret->addToChatHistory();
+                });
 	} break;
 
 	case mtpc_updateEncryptedMessagesRead: {

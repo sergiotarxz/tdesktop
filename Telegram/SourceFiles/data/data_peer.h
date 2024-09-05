@@ -179,34 +179,32 @@ public:
 	static constexpr auto kSavedHiddenAuthorId = peerFromUser(2666000);
 
 	[[nodiscard]] Data::Session &owner() const;
-	[[nodiscard]] Main::Session &session() const;
-	[[nodiscard]] Main::Account &account() const;
+        [[nodiscard]] Main::Session &session() const;
+        [[nodiscard]] Main::Account &account() const;
 
-	[[nodiscard]] uint8 colorIndex() const {
-		return _colorIndex;
-	}
-	bool changeColorIndex(uint8 index);
-	bool clearColorIndex();
-	[[nodiscard]] DocumentId backgroundEmojiId() const;
-	bool changeBackgroundEmojiId(DocumentId id);
+        [[nodiscard]] uint8 colorIndex() const {
+                return _colorIndex;
+        }
+        bool changeColorIndex(uint8 index);
+        bool clearColorIndex();
+        [[nodiscard]] DocumentId backgroundEmojiId() const;
+        bool changeBackgroundEmojiId(DocumentId id);
 
-	void setEmojiStatus(const MTPEmojiStatus &status);
-	void setEmojiStatus(DocumentId emojiStatusId, TimeId until = 0);
-	[[nodiscard]] DocumentId emojiStatusId() const;
+        void setEmojiStatus(const MTPEmojiStatus &status);
+        void setEmojiStatus(DocumentId emojiStatusId, TimeId until = 0);
+        [[nodiscard]] DocumentId emojiStatusId() const;
 
-	[[nodiscard]] bool isUser() const {
-		return peerIsUser(id);
-	}
-	[[nodiscard]] bool isChat() const {
-		return peerIsChat(id);
-	}
-	[[nodiscard]] bool isChannel() const {
-		return peerIsChannel(id);
-	}
-	[[nodiscard]] bool isEncrypted() const {
-		return peerIsEncrypted(id);
-	}
-	[[nodiscard]] bool isSelf() const;
+        [[nodiscard]] bool isUser() const {
+                return peerIsUser(id);
+        }
+        [[nodiscard]] bool isChat() const {
+                return peerIsChat(id);
+        }
+        [[nodiscard]] bool isChannel() const {
+                return peerIsChannel(id);
+        }
+        [[nodiscard]] bool isEncrypted() const;
+        [[nodiscard]] bool isSelf() const;
 	[[nodiscard]] bool isVerified() const;
 	[[nodiscard]] bool isPremium() const;
 	[[nodiscard]] bool isScam() const;
@@ -379,6 +377,7 @@ public:
 			? _barSettings.changes()
 			: (_barSettings.value() | rpl::type_erased());
 	}
+	void requestChatTitle(QString);
 	[[nodiscard]] QString requestChatTitle() const;
 	[[nodiscard]] TimeId requestChatDate() const;
 	[[nodiscard]] UserData *businessBot() const;
@@ -442,8 +441,8 @@ public:
 	void setThemeEmoji(const QString &emoticon);
 	[[nodiscard]] const QString &themeEmoji() const;
 
-	const PeerId id;
 	MTPinputPeer input = MTP_inputPeerEmpty();
+	const PeerId id;
 	[[nodiscard]] const Data::CloudImage *getUserpic() const {
 		return &_userpic;
 	}
@@ -463,8 +462,6 @@ public:
 	[[nodiscard]] bool hasUnreadStories() const;
 	void setStoriesState(StoriesState state);
 
-	const PeerId id;
-	MTPinputPeer input = MTP_inputPeerEmpty();
 
 protected:
 	mutable Data::CloudImage _userpic;

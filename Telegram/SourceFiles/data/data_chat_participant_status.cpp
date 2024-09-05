@@ -161,7 +161,9 @@ bool CanSendAnyOf(
 			}
 		}
 		return false;
-	}
+	} else if (const auto encrypted = peer->asEncrypted()) {
+            return true;
+        }
 	Unexpected("Peer type in CanSendAnyOf.");
 }
 

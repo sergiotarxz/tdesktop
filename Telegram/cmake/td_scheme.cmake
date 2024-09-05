@@ -11,9 +11,7 @@ add_library(tdesktop::td_scheme ALIAS td_scheme)
 include(cmake/generate_scheme.cmake)
 
 set(scheme_files
-    ${res_loc}/tl/mtproto.tl
-    ${res_loc}/tl/api.tl
-    ${res_loc}/tl/end-to-end.tl
+    ${src_loc}/mtproto/scheme/end-to-end.tl
     ${src_loc}/mtproto/scheme/api.tl
     ${src_loc}/mtproto/scheme/mtproto.tl
 )
@@ -22,7 +20,7 @@ generate_scheme(td_scheme ${src_loc}/codegen/scheme/codegen_scheme.py "${scheme_
 
 nice_target_sources(td_scheme ${src_loc}/mtproto/scheme
 PRIVATE
-    tl/end-to-end.tl
+    end-to-end.tl
     api.tl
     mtproto.tl
 )

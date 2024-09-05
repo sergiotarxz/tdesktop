@@ -11,6 +11,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_channel.h"
 #include "data/data_chat.h"
 #include "data/data_user.h"
+#include "data/data_encrypted_chat.h"
 #include "data/data_changes.h"
 #include "data/data_forum_topic.h"
 #include "data/data_session.h"
@@ -198,9 +199,6 @@ inline auto DefaultRestrictionValue(
 	return CanSendAnyOfValue(thread->peer(), rights, forbidInForums);
 }
 
-rpl::producer<bool> CanWriteValue(EncryptedChatData *encrypted) {
-	return rpl::single(true);
-}
 // Duplicated in CanSendAnyOf().
 [[nodiscard]] rpl::producer<bool> CanSendAnyOfValue(
 		not_null<PeerData*> peer,
@@ -254,53 +252,15 @@ rpl::producer<bool> CanWriteValue(EncryptedChatData *encrypted) {
 				|| (adminRights.value != ChatAdminRights(0))
 				|| (rights & ~defaultSendRestrictions));
 		});
-}
-
-rpl::producer<bool> CanWriteValue(ChannelData *channel) {
-	using Flag = ChannelDataFlag;
-	const auto mask = 0
-		| Flag::Left
-		| Flag::HasLink
-		| Flag::Forbidden
-		| Flag::Creator
-		| Flag::Broadcast;
-	return rpl::combine(
-		PeerFlagsValue(channel, mask),
-		AdminRightValue(
-			channel,
-			ChatAdminRight::PostMessages),
-		RestrictionValue(
-			channel,
-			ChatRestriction::SendMessages),
-		DefaultRestrictionValue(
-			channel,
-			ChatRestriction::SendMessages),
-		[](
-				ChannelDataFlags flags,
-				bool postMessagesRight,
-				bool sendMessagesRestriction,
-				bool defaultSendMessagesRestriction) {
-			const auto notAmInFlags = Flag::Left | Flag::Forbidden;
-			const auto allowed = !(flags & notAmInFlags)
-				|| (flags & Flag::HasLink);
-			return allowed && (postMessagesRight
-					|| (flags & Flag::Creator)
-					|| (!(flags & Flag::Broadcast)
-						&& !sendMessagesRestriction
-						&& !defaultSendMessagesRestriction));
-		});
-}
-
-rpl::producer<bool> CanWriteValue(not_null<PeerData*> peer) {
-	if (auto user = peer->asUser()) {
-		return CanWriteValue(user);
-	} else if (auto chat = peer->asChat()) {
-		return CanWriteValue(chat);
-	} else if (auto channel = peer->asChannel()) {
-		return CanWriteValue(channel);
 	} else if (auto encrypted = peer->asEncrypted()) {
-		return CanWriteValue(encrypted);
-=======
+                using Flag = EncryptedChatDataFlag;
+		return rpl::combine(
+                    PeerFlagsValue(encrypted, EncryptedChatDataFlag::Empty),
+                    [=](
+                        EncryptedChatDataFlags flags
+                    ) -> bool {
+                        return true;
+                });
 	} else if (const auto channel = peer->asChannel()) {
 		using Flag = ChannelDataFlag;
 		const auto mask = Flag()

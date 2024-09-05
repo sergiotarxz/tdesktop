@@ -511,7 +511,9 @@ void Cover::refreshUploadPhotoOverlay() {
 				|| (user->isContact()
 					&& !user->isInaccessible()
 					&& !user->isServiceUser());
-		}
+		} else if (const auto encrypted = _peer->asEncrypted()) {
+                    return false;
+                }
 		Unexpected("Peer type in Info::Profile::Cover.");
 	}(), [=](Ui::UserpicButton::ChosenImage chosen) {
 		using ChosenType = Ui::UserpicButton::ChosenType;

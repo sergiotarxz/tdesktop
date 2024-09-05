@@ -600,6 +600,10 @@ void Histories::sendReadRequest(not_null<History*> history, State &state) {
 	state.sentReadDone = false;
 	DEBUG_LOG(("Reading: sending request now with till %1."
 		).arg(tillId.bare));
+        if (history->peer->isEncrypted()) {
+            printf("Avoided recovering history for encrypted peer\n");
+            return;
+        }
 	sendRequest(history, RequestType::ReadInbox, [=](Fn<void()> finish) {
 		DEBUG_LOG(("Reading: sending request invoked with till %1."
 			).arg(tillId.bare));

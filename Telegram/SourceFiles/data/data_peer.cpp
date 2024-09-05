@@ -198,6 +198,9 @@ PeerData::PeerData(not_null<Data::Session*> owner, PeerId id)
 , _owner(owner)
 , _colorIndex(Data::DecideColorIndex(id)) {
 }
+[[nodiscard]] bool PeerData::isEncrypted() const {
+    return peerIsEncrypted(id);
+}
 
 Data::Session &PeerData::owner() const {
 	return *_owner;
@@ -695,6 +698,11 @@ void PeerData::setBarSettings(const MTPPeerSettings &data) {
 				: Flag()));
 	});
 }
+
+void PeerData::requestChatTitle(QString requestChatTitle) {
+    _barDetails->requestChatTitle = requestChatTitle;    
+}
+
 QString PeerData::requestChatTitle() const {
 	return _barDetails ? _barDetails->requestChatTitle : QString();
 }

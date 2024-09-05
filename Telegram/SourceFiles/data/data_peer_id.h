@@ -97,7 +97,7 @@ bool operator>=(PeerIdZero, ChatIdType<Shift>) = delete;
 using UserId = ChatIdType<0>;
 using ChatId = ChatIdType<1>;
 using ChannelId = ChatIdType<2>;
-using EncryptedId = ChatIdType<3>;
+using EncryptedId = ChatIdType<127>;
 using FakeChatId = ChatIdType<0x7F>;
 
 struct PeerIdHelper {
@@ -125,12 +125,13 @@ struct PeerId {
 	friend inline constexpr auto operator<=>(PeerId, PeerId) = default;
 
 	template <typename SomeChatIdType, BareId = SomeChatIdType::kShift>
-	[[nodiscard]] constexpr bool is() const noexcept {
-		if (EncryptedId::kShift == SomeChatIdType::kShift) {
-			return true;
-		}
-		return ((value >> 48) & BareId(0xFF)) == SomeChatIdType::kShift;
-	}
+        [[nodiscard]] constexpr bool is() const noexcept {
+            if (SomeChatIdType::kShift == 4) {
+                printf("RESTO: %lld\n", ((value >> 48) & BareId(127)));
+            }
+            return ((value >> 48) & BareId(127)) == SomeChatIdType::kShift;
+        }
+	[[nodiscard]] constexpr bool is() const noexcept;
 
 	template <typename SomeChatIdType, BareId = SomeChatIdType::kShift>
 	[[nodiscard]] constexpr SomeChatIdType to() const noexcept {

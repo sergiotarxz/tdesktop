@@ -783,7 +783,7 @@ void GenerateItems(
 	const auto channel = history->peer->asChannel();
 	const auto broadcast = channel->isBroadcast();
 	const auto &action = event.vaction();
-	const auto date = event.vdate().v;
+	const int date = event.vdate().v;
 	const auto addPart = [&](
 			not_null<HistoryItem*> item,
 			TimeId sentDate = 0,

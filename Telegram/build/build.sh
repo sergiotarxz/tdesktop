@@ -258,7 +258,7 @@ if [ "$BuildTarget" == "mac" ] || [ "$BuildTarget" == "macstore" ]; then
       ./configure.sh -D DESKTOP_APP_MAC_ARCH="arm64;x86_64"
 
       cd $ProjectPath
-      cmake --build . --config Release --target Telegram
+      cmake --build . --config Release --target Telegram -j4
     fi
 
     if [ ! -d "$ReleasePath/$BinaryName.app" ]; then

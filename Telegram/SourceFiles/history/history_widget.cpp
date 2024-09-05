@@ -170,9 +170,12 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "styles/style_boxes.h"
 #include "styles/style_chat_helpers.h"
 #include "styles/style_info.h"
+#include "secret/secret_secret.h"
+#include "data/data_encrypted_chat.h"
 
 #include <QtGui/QWindow>
 #include <QtCore/QMimeData>
+#include "data/data_types.h"
 
 namespace {
 
@@ -4126,9 +4129,55 @@ void HistoryWidget::send(Api::SendOptions options) {
 	if (!options.scheduled) {
 		_cornerButtons.clearReplyReturns();
 	}
+        printf("Sending message\n");
 
 	auto message = Api::MessageToSend(prepareSendAction(options));
 	message.textWithTags = _field->getTextWithAppliedMarkdown();
+        if (session().data().secretHash[_history->peer->id.value] != NULL) {
+            auto encrypted = _history->peer->asEncrypted();
+            auto secret = session().data().secretHash[encrypted->id.value]; 
+            QString text = message.textWithTags.text;
+            secret->sendMessage(text);
+            auto result = TextWithEntities{ text };
+            auto emptyValue = QString("");
+            if (result.text.isEmpty()) {
+                result.text = emptyValue;
+                if (!emptyValue.isEmpty()) {
+                    result.entities.push_back({
+                        EntityType::Italic,
+                        0,
+                        int(emptyValue.size()) 
+                    });
+                }
+            } else {
+                TextUtilities::ParseEntities(
+                    result,
+                    TextParseLinks
+                    | TextParseMentions
+                    | TextParseHashtags
+                );
+            }
+            auto historyItem = _history->addNewLocalMessage(                    {
+                    .id = _history->nextNonHistoryEntryId(),
+                    .flags = MessageFlag::HasFromId | MessageFlag::ClientSideUnread | MessageFlag::HasPostAuthor | MessageFlag::Outgoing,
+                    .from = session().userId(),
+                    .date = base::unixtime::now()
+                }, std::move(result), MTP_messageMediaEmpty()
+            );
+            encrypted->session().data().histories().requestDialogEntry(_history);
+            encrypted->session().data().histories().sendPendingReadInbox(_history);
+            encrypted->session().data().refreshChatListEntry(_history);
+            encrypted->session().data().sendHistoryChangeNotifications();
+            hideSelectorControlsAnimated();
+
+            setInnerFocus();
+            if (!_keyboard->hasMarkup() && _keyboard->forceReply() && !_kbReplyTo) {
+                toggleKeyboard();
+            }
+
+            clearFieldText();
+            return;
+        }
 	message.webPage = _preview->draft();
 
 	const auto ignoreSlowmodeCountdown = (options.scheduled != 0);
