@@ -377,7 +377,7 @@ handleUpdateEncryptedChatRequested(Main::Session &session, const MTPDencryptedCh
 	auto access_hash = encryptedRequested.vaccess_hash().v;
 	auto ga = bytes::make_vector(encryptedRequested.vg_a().v);
 	MTPInputEncryptedChat peer = MTP_inputEncryptedChat(MTP_int(id), MTP_long(access_hash));
-        auto newId = PeerId(EncryptedId(id));
+        auto newId = EncryptedId(id);
 	auto peerEncryptedData = session.data().peer(newId)->asEncrypted();
 	peerEncryptedData->inputEncrypted = new MTPInputEncryptedChat(peer);
 	auto secret = new Secret(peerEncryptedData, false, callback);
@@ -406,7 +406,9 @@ void handleUpdateNewEncryptedMessage(Main::Session &session,
         printf("Reachs mtpc_updateNewEncryptedMessageService.\n");
         auto encryptedMessage = &message.c_encryptedMessageService();
         auto &chatId = encryptedMessage->vchat_id().v;
-        auto secret = session.data().secretHash[chatId];
+        auto peer = session.data().peer(EncryptedId(chatId));
+        printf("New secret: %lld\n", peer->id.value);
+        auto secret = session.data().secretHash[peer->id.value];
         printf("isAuthor: %d\n", secret->isAuthor());
         secret->incrementInputMessages();
         return;
@@ -415,7 +417,9 @@ void handleUpdateNewEncryptedMessage(Main::Session &session,
         printf("Reachs mtpc_updateNewEncryptedMessage.\n");
         auto encryptedMessage = &message.c_encryptedMessage();
         auto &chatId = encryptedMessage->vchat_id().v;
-        auto secret = session.data().secretHash[chatId];
+        auto peer = session.data().peer(EncryptedId(chatId));
+        printf("New secret: %lld\n", peer->id.value);
+        auto secret = session.data().secretHash[peer->id.value];
         printf("isAuthor: %d\n", secret->isAuthor());
         secret->incrementInputMessages();
         auto x = secret->isAuthor() ? 8 : 0;
